@@ -1,4 +1,4 @@
-﻿invenv__cuotas__x__cobrar__nc__comprascaja.v_reciboegresoscajaventas.v_listar_cabecera_facturacion
+﻿v_imprimircomprobantesinvenv__cuotas__x__cobrar__nc__comprascaja.v_reciboegresoscajaventas.v_listar_cabecera_facturacion
 select *from planillas.v_persona
 
 ATTR fn_list_ventas_agrupadas
@@ -129,6 +129,19 @@ select *from ventas.tbl_facturacion f where f.id_tipoventa=1
 select *from almacen.V_INVENTARIOVALORCIADOINICIAL
 select *from seguridad.tbl_usuario
 
+select 
+  COALESCE((select '-' || replace(replace(replace(replace(replace(t.telefono::text,'[{"key":"' ,''),'","',':'),'value":"',''),'"},{"key":"','</br>- '),'"}]','')
+			from (
+	select 
+		(
+	      select array_to_json(array_agg(row_to_json(d)))
+	      from (
+		select  key,value		 
+		from almacen.tbl_datos_adicionales_producto_venta  tl
+		--where cli.id_persona=tl.id_persona
+	      ) d
+	    ) as telefono
+	) t),'')
 
 
 
@@ -5535,7 +5548,8 @@ AS
 	est.smtp_facturacion ,
 	est.port_facturacion ,
 	endpoint_mobil,
-	genera_mobil 
+	genera_mobil ,
+	correo_ssl
    FROM common.tbl_empresa est
      JOIN common.tbl_estado e ON est.id_estado = e.id_estado
      INNER JOIN ventas.tbl_sector  s on s.id_sector=est.id_sector
@@ -5886,11 +5900,101 @@ AS
      JOIN almacen.tbl_producto p ON p.id_producto::text = dp.id_producto::text
      JOIN common.tbl_estado e ON dc.id_estado = e.id_estado;
 
+select  *from almacen.v_detalle_compra_apllica_nota_Credito
+
+CREATE OR REPLACE view almacen.v_detalle_compra_apllica_nota_Credito
+as
+ SELECT 
+                    g.codarti,
+                    g.articulo,
+                    g.grupo,
+                    g.linea,
+                    g.contenido,                    		  
+                    g.unidadm,
+                    g.almacen,
+                   
+                    sum(g.cant) AS cant,
+                    g.punit,
+                     CASE
+			    WHEN g.punit > 0::numeric THEN compras.fn_dscto_notacredito(g.id__compra, g.id_sucursalcompra)::numeric(20,4)::text
+			    ELSE '-'::text
+		    END imp_dscto,
+                    g.punit -
+                        CASE
+                            WHEN g.punit > 0::numeric THEN COALESCE(compras.fn_dscto_notacredito(g.id__compra, g.id_sucursalcompra), 0::numeric)
+                            ELSE 0::numeric
+                        END AS costo,
+		   (g.punit -
+                        CASE
+                            WHEN g.punit > 0::numeric THEN COALESCE(compras.fn_dscto_notacredito(g.id__compra, g.id_sucursalcompra), 0::numeric)
+                            ELSE 0::numeric
+                        END)*sum(g.cant) AS Imp_total,
+                    g.idunimed,
+                    g.serie,
+                    g.numero,
+                    g.id_producto,
+                    g.codigo,
+                     g.fecha,
+                    g.tipodoc,
+                    g.documento,
+                    g.id__compra,
+                    g.id_sucursalcompra
+                    
+                   FROM ( SELECT 1::character(1) AS tipo,
+                            btrim(prod.id_producto::text) AS codarti,
+                            prod.descripcion_larga AS articulo,
+                            g_1.descripcion_larga AS grupo,
+                            f.descripcion_larga AS linea,
+                            0::numeric AS contenido,
+                            p.nombre_razon AS proveedor,
+                            p.doc_persona AS ruc,
+                            u.desc_corta AS unidadm,
+                            d.id_almacen AS almacen,
+                            'C'::text AS movi,
+                            c.fec_ingalmacen::date AS fecha,
+                            c.id_comprobante AS tipodoc,
+                            (((comp.descripcion_corta::text || '/'::text) || c.serie::text) || '-'::text) || c.nro_doc_compra::text AS documento,
+                            x.cantidad AS cant,
+                            (d.imp_incluido /
+                                CASE
+                                    WHEN x.cantidad > 0::numeric THEN x.cantidad
+                                    ELSE 1::numeric
+                                END)::numeric(20,4) +
+                                CASE
+                                    WHEN COALESCE(d.imp_flete, 0::numeric) > 0::numeric THEN COALESCE(d.imp_flete, 0::numeric) / dp.val_unidad
+                                    ELSE 0::numeric
+                                END::numeric(20,4) AS punit,
+                            x.unit_id AS idunimed,
+                            c.serie,
+                            c.nro_doc_compra::integer AS numero,
+                            prod.id_producto,
+                            d.id_almacen,
+                            s.id_empresa,
+                            f.id_familia,
+                            date_part('hour'::text, c.fec_documento) AS hora,
+                            prod.codigo,
+                            c.id__compra,
+                            c.id_sucursalcompra
+                           FROM compras.tbl_compra c
+                             JOIN ventas.tbl_direccion dir ON dir.id_direccion = c.id_dirproveedor AND dir.id_persona::text = c.id_proveedor::text
+                             JOIN planillas.tbl_persona p ON p.id_persona::text = dir.id_persona::text
+                             JOIN compras.tbl_detcompra d ON c.id_sucursalcompra = d.id_sucursalcompra AND c.id__compra = d.id__compra AND d.id_estado = 1
+                             JOIN almacen.tbl_detproducto dp ON dp.id_producto::text = d.id_producto::text AND dp.id_unidadventa = d.id_unidadventa AND dp.id_estado = 1
+                             JOIN LATERAL almacen.fn_stock(d.id_producto, d.id_unidadventa, d.id_almacen, d.cantidad) x(product_id, unit_id, val_unit, stock, cantidad) ON x.product_id::text = dp.id_producto::text
+                             JOIN almacen.tbl_producto prod ON prod.id_producto::text = dp.id_producto::text
+                             JOIN almacen.tbl_familia f ON f.id_familia = prod.id_familia
+                             JOIN almacen.tbl_grupo g_1 ON g_1.id_grupo = f.id_grupo
+                             JOIN almacen.tbl_unidad u ON u.id_unidadventa = x.unit_id
+                             JOIN common.tbl_sucursal s ON s.id_sucursal = c.id_sucursalcompra
+                             JOIN common.tbl_comprobante comp ON comp.id_comprobante = c.id_comprobante
+                          WHERE c.id_estado = 1 AND c.nota_credito = false) g
+                  GROUP BY g.tipo, g.codarti, g.articulo, g.grupo, g.linea, g.contenido, g.proveedor, g.ruc, g.unidadm, g.almacen, g.movi, g.fecha, g.tipodoc, g.documento, g.cant, g.punit, g.idunimed, g.serie, g.numero, g.id_producto, g.id_almacen, 
+g.id_empresa, g.id_familia, g.hora, g.codigo, g.id__compra, g.id_sucursalcompra
 
 
 select *from compras.tbl_compra
 
-select *from compras.v_compras
+select *from compras.v_detcompras
 DELETE from common.tbl_concepto WHERE ID_ESTADO<>1
 SELECT *FROM COMMON.TBL_CONCEPTO WHERE ID=1102
 
@@ -6981,7 +7085,8 @@ CREATE OR REPLACE   VIEW almacen.v_producto
     p.venta_retaceo,
     est.des_estado as estado,
     p.cantidad_fraccionada,
-    p.afecto_icbper
+    p.afecto_icbper,
+    p.solicitadatosadicionales
    FROM almacen.tbl_producto p
      JOIN almacen.tbl_familiamarca fm ON fm.id_familia = p.id_familia AND fm.id_marca = p.id_marca
      JOIN almacen.tbl_familia f ON f.id_familia = fm.id_familia
@@ -9898,7 +10003,8 @@ select * from creditos.v_cuenta_corriente_clientes  where id_empresa=1 and fec_c
 select *from creditos.tbl_cuota_notacredito
 select *from creditos.v_creditos_x_cobrar
 
-CREATE OR REPLACE VIEW creditos.v_creditos_x_cobrar AS 
+CREATE OR REPLACE VIEW creditos.v_creditos_x_cobrar 
+AS 
  SELECT
         CASE
             WHEN fac.id_unidad IS NULL THEN ((((tbl_comprobante.descripcion_corta::text || '/'::text) || fac.serie_facturacion::text) || '-'::text) || fac.numdoc_facturacion::text)::character varying
@@ -9921,16 +10027,19 @@ CREATE OR REPLACE VIEW creditos.v_creditos_x_cobrar AS
            FROM creditos.tbl_detpagocuota dp
              JOIN caja.tbl_movcaja mc ON mc.id_movimcaja = dp.id_movimcaja AND mc.id_sucursal = dp.id_sucursal
           WHERE dp.id_credito = vc.id_credito AND dp.id_sucursal_credito = vc.id_sucursal_credito AND mc.id_estado = 1), 0::numeric) AS pagos,
-    COALESCE(( SELECT sum(c.imp_cuota) AS sum
+    /*COALESCE(( SELECT sum(c.imp_cuota) AS sum
            FROM creditos.tbl_cuota c
-          WHERE cred.id_credito = c.id_credito AND cred.id_sucursal_credito = c.id_sucursal_credito), 0::numeric) - COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+          WHERE cred.id_credito = c.id_credito AND cred.id_sucursal_credito = c.id_sucursal_credito), 0::numeric) - 
+          COALESCE(( SELECT sum(cmov.imp_pago) AS sum
            FROM creditos.tbl_cuota c
              JOIN creditos.tbl_detpagocuota cmov ON c.id_cuotas = cmov.id_cuotas AND c.id_credito = cmov.id_credito AND c.id_sucursal_credito = cmov.id_sucursal_credito
              JOIN caja.tbl_movcaja mov ON mov.id_movimcaja = cmov.id_movimcaja AND mov.id_sucursal = cmov.id_sucursal
-          WHERE cred.id_credito = c.id_credito AND cred.id_sucursal_credito = c.id_sucursal_credito AND mov.id_estado = 1 and cmov.id_estado=1), 0::numeric)- COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+          WHERE cred.id_credito = c.id_credito AND cred.id_sucursal_credito = c.id_sucursal_credito AND mov.id_estado = 1 and cmov.id_estado=1), 0::numeric)- 
+          COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
            FROM creditos.tbl_cuota_notacredito nc
-          WHERE  cred.id_credito = nc.id_credito AND cred.id_sucursal_credito = nc.id_sucursal_cred), 0::numeric) AS saldo,
-    fac.imp_neto + COALESCE(( SELECT sum(c.imp_interes) AS sum
+          WHERE  cred.id_credito = nc.id_credito AND cred.id_sucursal_credito = nc.id_sucursal_cred and nc.id_estado=1), 0::numeric) AS saldo,*/
+          (cc.imp_cuota-COALESCE(nc.imp_nc,0)-COALESCE(z.imp_dscto,0)-COALESCE(pc.imp_pago_cuota,0))+COALESCE(cc.imp_mora,0)  AS saldo,
+	  fac.imp_neto + COALESCE(( SELECT sum(c.imp_interes) AS sum
            FROM creditos.tbl_cuota c
           WHERE cred.id_credito = c.id_credito AND cred.id_sucursal_credito = c.id_sucursal_credito), 0.00) AS total_venta,
     tbl_tipoventa.descripcion_larga::text AS tipo_venta,
@@ -9945,16 +10054,54 @@ CREATE OR REPLACE VIEW creditos.v_creditos_x_cobrar AS
     fac.numdoc_facturacion,
     cli.doc_persona AS dni,
     suc.id_empresa,
-    COALESCE((select sum(nc.imp_dscto) from creditos.tbl_cuota_notacredito NC where cred.ID_CREDITO=NC.ID_CREDITO AND cred.ID_SUCURSAL_CREDITO=NC.id_sucursal_cred),0) as importe_nc
-   FROM ventas.tbl_facturacion fac
-     JOIN creditos.tbl_ventacredito vc ON fac.id_sucursal = vc.id_sucursal AND vc.id_facturacion = fac.id_facturacion AND fac.id_tipoventa = 2 AND vc.id_estado = 1
-     JOIN creditos.tbl_credito cred ON cred.id_credito = vc.id_credito AND cred.id_sucursal_credito = vc.id_sucursal_credito
-     JOIN common.tbl_comprobante ON fac.id_comprobante = tbl_comprobante.id_comprobante
-     JOIN common.tbl_moneda ON fac.id_moneda = tbl_moneda.id_moneda
-     JOIN ventas.tbl_direccion dir ON dir.id_persona::text = fac.id_cliente::text AND dir.id_direccion = fac.id_direccion
-     JOIN planillas.tbl_persona cli ON cli.id_persona::text = dir.id_persona::text
-     JOIN common.tbl_tipoventa ON tbl_tipoventa.id_tipoventa = fac.id_tipoventa
-     JOIN common.tbl_sucursal suc ON suc.id_sucursal = fac.id_sucursal
+   COALESCE(nc.imp_nc,0) as importe_nc
+FROM ventas.tbl_facturacion fac
+JOIN creditos.tbl_ventacredito vc ON fac.id_sucursal = vc.id_sucursal AND vc.id_facturacion = fac.id_facturacion AND fac.id_tipoventa <> 1 AND vc.id_estado = 1
+JOIN creditos.tbl_credito cred ON cred.id_credito = vc.id_credito AND cred.id_sucursal_credito = vc.id_sucursal_credito
+JOIN common.tbl_comprobante ON fac.id_comprobante = tbl_comprobante.id_comprobante
+JOIN common.tbl_moneda ON fac.id_moneda = tbl_moneda.id_moneda
+JOIN ventas.tbl_direccion dir ON dir.id_persona::text = fac.id_cliente::text AND dir.id_direccion = fac.id_direccion
+JOIN planillas.tbl_persona cli ON cli.id_persona::text = dir.id_persona::text
+JOIN common.tbl_tipoventa ON tbl_tipoventa.id_tipoventa = fac.id_tipoventa
+JOIN common.tbl_sucursal suc ON suc.id_sucursal = fac.id_sucursal
+left join (
+	SELECT sum(c.imp_cuota) as imp_cuota,
+		sum(COALESCE(creditos.getfunccalmora(c.id_cuotas)::numeric(20,4),0))  as imp_mora,
+		c.id_credito,
+		c.id_sucursal_credito
+           FROM creditos.tbl_cuota c
+       group by c.id_credito ,c.id_sucursal_credito
+) cc on cred.id_credito = cc.id_credito AND cred.id_sucursal_credito = cc.id_sucursal_credito
+LEFT JOIN (
+	select 
+		sum(COALESCE(NC.imp_dscto,0)) as imp_nc,
+		nc.id_credito,
+		nc.id_sucursal_cred as id_sucursal  
+		from creditos.tbl_cuota_notacredito NC 
+		inner join creditos.tbl_cuota cc on nc.id_credito = cc.id_credito AND nc.id_sucursal_cred = cc.id_sucursal_credito  and cc.id_cuotas=nc.id_cuota
+	where nc.id_estado=1
+	group by nc.id_credito,nc.id_sucursal_cred
+) nc ON nc.id_credito = cred.id_credito AND nc.id_sucursal = cred.id_sucursal_credito  
+LEFT JOIN ( SELECT 
+	    sum(dp.imp_pago_cuota) AS imp_pago_cuota,
+	    sum(dp.imp_mora) as imp_mora,	  
+	    dp.id_credito,
+	    dp.id_sucursal_credito AS id_sucursal
+	   FROM caja.tbl_movcaja m
+	     JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+	  WHERE dp.id_estado = 1
+	  group by  
+	    dp.id_credito,
+	    dp.id_sucursal_credito
+) pc ON  cred.id_credito = pc.id_credito AND cred.id_sucursal_credito = pc.id_sucursal  
+LEFT JOIN ( SELECT dp.imp_pago AS imp_dscto,	    
+	    dp.id_credito,
+	    dp.id_sucursal_credito AS id_sucursal
+	   FROM caja.tbl_movcaja m
+	     JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+	  WHERE m.pronto_pago = true AND m.id_estado = 1
+) z ON cred.id_credito = z.id_credito AND cred.id_sucursal_credito = z.id_sucursal
+
   WHERE fac.id_estado = 1
 UNION ALL
  SELECT (((tbl_comprobante.descripcion_corta::text || '/'::text) || ha.serie::text) || '-'::text) || ha.numero::text AS documento,
@@ -10251,7 +10398,8 @@ select * from creditos.v_cuotas_x_cobrar   where id_credito::text || id_sucursal
 
 select * from creditos.v_cuotas_x_cobrar   where id_credito::text || id_sucursal_credito::text in('16231')
 
-CREATE OR REPLACE VIEW creditos.v_cuotas_x_cobrar AS 
+CREATE OR REPLACE VIEW creditos.v_cuotas_x_cobrar 
+AS 
  SELECT c.nro_cuota,
     c.fec_vencimiento + ((COALESCE(c.dias_gracia, 0) || ' days'::text)::interval) AS fecha_vencimiento,
     c.imp_capital,
@@ -10372,6 +10520,266 @@ AS
            FROM caja.tbl_movcaja m
              JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
           WHERE m.pronto_pago = true AND m.id_estado = 1) z ON c.id_cuotas = z.id_cuotas AND c.id_credito = z.id_credito AND c.id_sucursal_credito = z.id_sucursal
+  ORDER BY c.nro_cuota;
+
+
+select * from creditos.v_cuotas_x_cobrar   where id_credito::text || id_sucursal_credito::text in('12491')
+select id_estado,  *from creditos.tbl_detpagocuota where id_cuotas=5157
+
+CREATE OR REPLACE VIEW CREDITOS.V_CUOTA_CREDITO_CLIENTE
+AS
+SELECT 
+false as T,	
+c.nro_cuota as nro,
+c.fec_vencimiento,
+c.imp_capital,
+c.imp_interes,
+c.imp_cuota,
+COALESCE(nc.imp_nc,0) as imp_nc,
+COALESCE(z.imp_dscto,0) as imp_dscto,
+COALESCE(c.imp_cuota,0)-COALESCE(nc.imp_nc,0)-COALESCE(z.imp_dscto,0)-COALESCE(pc.imp_pago_cuota,0) as saldo_cuota_pendiente,
+creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) AS mora_pendiente,
+COALESCE(pc.imp_mora,0) as imp_mora_amortizada,
+COALESCE(pc.imp_pago_cuota,0) as imp_cuota_amortizada,
+COALESCE(pc.imp_pago_cuota,0)+COALESCE(pc.imp_mora,0) as imp_pagos,
+(c.imp_cuota-COALESCE(nc.imp_nc,0)-COALESCE(z.imp_dscto,0)-COALESCE(pc.imp_pago_cuota,0))+COALESCE(creditos.getfunccalmora(c.id_cuotas)::numeric(20,4),0)  as saldo_total_pendiente,
+COALESCE(c.nro_letra, '-'::character varying) AS nro_letra,
+c.id_cuotas,
+c.id_credito,
+c.id_sucursal_credito,
+c.id_estado
+FROM  creditos.tbl_cuota c
+ LEFT JOIN (
+	select sum(COALESCE(NC.imp_dscto,0)) as imp_nc,nc.id_credito,nc.id_cuota,nc.id_sucursal_cred as id_sucursal  from creditos.tbl_cuota_notacredito NC 
+	where nc.id_estado=1
+	group by nc.id_credito,nc.id_cuota,nc.id_sucursal_cred
+) nc ON nc.id_credito = c.id_credito AND nc.id_sucursal = c.id_sucursal_credito and c.id_cuotas=nc.id_cuota
+LEFT JOIN ( SELECT 
+	    sum(dp.imp_pago_cuota) AS imp_pago_cuota,
+	    sum(dp.imp_mora) as imp_mora,
+            dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito AS id_sucursal
+           FROM caja.tbl_movcaja m
+             JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+          WHERE dp.id_estado = 1
+          group by dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito
+) pc ON c.id_cuotas = pc.id_cuotas AND c.id_credito = pc.id_credito AND c.id_sucursal_credito = pc.id_sucursal
+LEFT JOIN ( SELECT dp.imp_pago AS imp_dscto,
+            dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito AS id_sucursal
+           FROM caja.tbl_movcaja m
+             JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+          WHERE m.pronto_pago = true AND m.id_estado = 1
+) z ON c.id_cuotas = z.id_cuotas AND c.id_credito = z.id_credito AND c.id_sucursal_credito = z.id_sucursal
+
+
+select  *from common.tbl_formapago
+
+select  *from seguridad.v__documento__usuario where id_proceso=16 and id_usuario='1'
+
+select *from creditos.tbl_detpagocuota where  id_cuotas=31 and id_credito=9 and  id_sucursal_credito=1
+
+create or replace function creditos.fn_corregir_saldos_creditos()
+returns text as  $$
+declare
+	dat record;
+	imp_cuota numeric(20,4);
+	nro_regs_cuota integer;
+	id__cuota integer;
+	
+begin
+	for dat in select c.*from creditos.tbl_cuota c 
+		inner join creditos.tbl_ventacredito vc on c.id_credito=vc.id_credito and c.id_sucursal_credito=vc.id_sucursal_credito loop
+		select *from creditos.tbl_cuota where id_cuotas=data.id_cuotas;
+	end loop;
+end;$$
+language 'plpgsql';
+
+update creditos.tbl_detpagocuota set imp_pago_cuota=imp_pago-imp_mora
+
+select *from creditos.tbl_cuota c
+
+select  *from creditos.tbl_detpagocuota
+
+select *from    creditos.tbl_cuota_notacredito 
+
+---PREDILECTA
+CREATE OR REPLACE VIEW creditos.v_cuotas_x_cobrar
+ AS
+ SELECT c.nro_cuota,
+    c.fec_vencimiento + ((COALESCE(c.dias_gracia, 0) || ' days'::text)::interval) AS fecha_vencimiento,
+    c.imp_capital,
+    c.imp_interes,
+    c.imp_cuota,
+    COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric) AS ncr,
+    COALESCE(z.imp_dscto, 0::numeric)::numeric(20,4) AS dscto,
+    creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) AS mora,
+    COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+           FROM creditos.tbl_detpagocuota cmov
+             JOIN caja.tbl_movcaja mov ON mov.id_movimcaja = cmov.id_movimcaja AND mov.id_sucursal = cmov.id_sucursal
+          WHERE c.id_cuotas = cmov.id_cuotas AND c.id_credito = cmov.id_credito AND c.id_sucursal_credito = cmov.id_sucursal_credito AND cmov.id_estado = 1 AND mov.pronto_pago = false AND cmov.id_estado = 1), 0::numeric) AS monto_cancelado,
+    c.imp_cuota + COALESCE(
+        CASE
+            WHEN creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) = 0::numeric THEN x.mora
+            ELSE creditos.getfunccalmora(c.id_cuotas)::numeric(20,4)
+        END, 0::numeric) - COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+           FROM creditos.tbl_detpagocuota cmov
+          WHERE c.id_cuotas = cmov.id_cuotas AND c.id_credito = cmov.id_credito AND c.id_sucursal_credito = cmov.id_sucursal_credito AND cmov.id_estado = 1), 0::numeric) - 
+          COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric) AS saldo_debito,
+    tbl_estado.des_estado AS estado,
+    c.fec_vencimiento,
+    c.id_cuotas,
+    c.id_credito,
+    c.id_sucursal_credito,
+    c.dias_gracia,
+    c.id_credito::text || c.id_sucursal_credito::text AS id_creditocuenta,
+    c.imp_cuota - COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred), 0::numeric) AS imp_cuota_pagar,
+    COALESCE(c.nro_letra, '-'::character varying) AS nro_letra,
+    c.id_estado,
+    COALESCE(c.fecha_protesto, c.fec_vencimiento) AS fecha_protesto,
+    COALESCE(c.nro_unico_pago, '-'::character varying) AS nro_unico_pago,
+    COALESCE(c.dias_protesto, 0) AS dias_protesto,
+    COALESCE(creditos.getfunccalmora(c.id_cuotas)::numeric, 0::numeric)::numeric(14,6) AS imp_mora,
+    COALESCE(x.mora, 0::numeric) AS mov_mora
+   FROM creditos.tbl_cuota c
+     JOIN common.tbl_estado ON tbl_estado.id_estado = c.id_estado
+     LEFT JOIN ( SELECT dpg.id_cuotas,
+            dpg.id_credito,
+            dpg.id_sucursal_credito,
+            sum(dpg.imp_mora) AS mora
+           FROM creditos.tbl_detpagocuota dpg
+          WHERE dpg.id_estado = 1
+          GROUP BY dpg.id_cuotas, dpg.id_credito, dpg.id_sucursal_credito) x ON x.id_cuotas = c.id_cuotas AND x.id_credito = c.id_credito AND x.id_sucursal_credito = c.id_sucursal_credito
+     LEFT JOIN ( SELECT dp.imp_pago AS imp_dscto,
+            dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito AS id_sucursal
+           FROM caja.tbl_movcaja m
+             JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+          WHERE m.pronto_pago = true AND m.id_estado = 1 AND dp.id_estado = 1) z ON c.id_cuotas = z.id_cuotas AND c.id_credito = z.id_credito AND c.id_sucursal_credito = z.id_sucursal
+  ORDER BY c.nro_cuota;
+
+
+--modificada 7.03.21
+
+CREATE OR REPLACE VIEW creditos.v_cuotas_x_cobrar
+ AS
+ SELECT c.nro_cuota,
+    c.fec_vencimiento + ((COALESCE(c.dias_gracia, 0) || ' days'::text)::interval) AS fecha_vencimiento,
+    c.imp_capital,
+    c.imp_interes,
+    c.imp_cuota,
+    COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric) AS ncr,
+    COALESCE(z.imp_dscto, 0::numeric)::numeric(20,4) AS dscto,
+    creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) AS mora,
+    COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+           FROM creditos.tbl_detpagocuota cmov
+             JOIN caja.tbl_movcaja mov ON mov.id_movimcaja = cmov.id_movimcaja AND mov.id_sucursal = cmov.id_sucursal
+          WHERE c.id_cuotas = cmov.id_cuotas AND c.id_credito = cmov.id_credito AND c.id_sucursal_credito = cmov.id_sucursal_credito AND cmov.id_estado = 1 AND mov.pronto_pago = false AND cmov.id_estado = 1), 0::numeric) AS monto_cancelado,
+    c.imp_cuota + COALESCE(
+        CASE
+            WHEN creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) = 0::numeric THEN 0 --x.mora
+            ELSE creditos.getfunccalmora(c.id_cuotas)::numeric(20,4)
+        END, 0::numeric) - COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+           FROM creditos.tbl_detpagocuota cmov
+          WHERE c.id_cuotas = cmov.id_cuotas AND c.id_credito = cmov.id_credito AND c.id_sucursal_credito = cmov.id_sucursal_credito AND cmov.id_estado = 1), 0::numeric) - 
+          COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric) AS saldo_debito,
+    tbl_estado.des_estado AS estado,
+    c.fec_vencimiento,
+    c.id_cuotas,
+    c.id_credito,
+    c.id_sucursal_credito,
+    c.dias_gracia,
+    c.id_credito::text || c.id_sucursal_credito::text AS id_creditocuenta,
+    c.imp_cuota - COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred), 0::numeric) AS imp_cuota_pagar,
+    COALESCE(c.nro_letra, '-'::character varying) AS nro_letra,
+    c.id_estado,
+    COALESCE(c.fecha_protesto, c.fec_vencimiento) AS fecha_protesto,
+    COALESCE(c.nro_unico_pago, '-'::character varying) AS nro_unico_pago,
+    COALESCE(c.dias_protesto, 0) AS dias_protesto,
+    COALESCE(creditos.getfunccalmora(c.id_cuotas)::numeric, 0::numeric)::numeric(14,6) AS imp_mora,
+    COALESCE(x.mora, 0::numeric) AS mov_mora
+   FROM creditos.tbl_cuota c
+     JOIN common.tbl_estado ON tbl_estado.id_estado = c.id_estado
+     LEFT JOIN ( SELECT dpg.id_cuotas,
+            dpg.id_credito,
+            dpg.id_sucursal_credito,
+            sum(dpg.imp_mora) AS mora
+           FROM creditos.tbl_detpagocuota dpg
+          WHERE dpg.id_estado = 1
+          GROUP BY dpg.id_cuotas, dpg.id_credito, dpg.id_sucursal_credito) x ON x.id_cuotas = c.id_cuotas AND x.id_credito = c.id_credito AND x.id_sucursal_credito = c.id_sucursal_credito
+     LEFT JOIN ( SELECT dp.imp_pago AS imp_dscto,
+            dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito AS id_sucursal
+           FROM caja.tbl_movcaja m
+             JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+          WHERE m.pronto_pago = true AND m.id_estado = 1 AND dp.id_estado = 1) z ON c.id_cuotas = z.id_cuotas AND c.id_credito = z.id_credito AND c.id_sucursal_credito = z.id_sucursal
+  ORDER BY c.nro_cuota;
+
+
+
+select  *from creditos.v_cuotas_x_cobrar
+select * from creditos.v_cuotas_x_cobrar   where id_credito::text || id_sucursal_credito::text in('12491')
+
+select *from creditos.tbl_detpagocuota where id_cuotas=5157 and id_estado=1
+
+
+
+select  *from creditos.tbl_ventacredito where id_credito=1249
+select  *from ventas.tbl_facturacion where id_facturacion=2209
+
+select  
+nro_cuota,
+c.fec_vencimiento + ((COALESCE(c.dias_gracia, 0) || ' days'::text)::interval) AS fecha_vencimiento,
+c.imp_capital,
+c.imp_interes,
+c.imp_cuota,
+ COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE c.id_cuotas = nc.id_cuota AND c.id_credito = nc.id_credito AND c.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric) AS ncr,
+    COALESCE(z.imp_dscto, 0::numeric)::numeric(20,4) AS dscto,
+    creditos.getfunccalmora(c.id_cuotas)::numeric(20,4) AS mora,
+ COALESCE(( SELECT sum(cmov.imp_pago) AS sum
+           FROM creditos.tbl_detpagocuota cmov
+             JOIN caja.tbl_movcaja mov ON mov.id_movimcaja = cmov.id_movimcaja AND mov.id_sucursal = cmov.id_sucursal
+          WHERE c.id_cuotas = cmov.id_cuotas 
+		AND c.id_credito = cmov.id_credito 
+		AND c.id_sucursal_credito = cmov.id_sucursal_credito 
+		AND cmov.id_estado = 1 AND mov.pronto_pago = false 
+		AND cmov.id_estado = 1), 0::numeric) AS monto_cancelado,
+from creditos.tbl_cuota c
+  JOIN common.tbl_estado ON tbl_estado.id_estado = c.id_estado
+     LEFT JOIN ( SELECT dpg.id_cuotas,
+            dpg.id_credito,
+            dpg.id_sucursal_credito,
+            sum(dpg.imp_mora) AS mora
+           FROM creditos.tbl_detpagocuota dpg
+          WHERE dpg.id_estado = 1
+          GROUP BY dpg.id_cuotas, dpg.id_credito, dpg.id_sucursal_credito) x ON x.id_cuotas = c.id_cuotas AND x.id_credito = c.id_credito AND x.id_sucursal_credito = c.id_sucursal_credito
+     LEFT JOIN ( SELECT dp.imp_pago AS imp_dscto,
+            dp.id_cuotas,
+            dp.id_credito,
+            dp.id_sucursal_credito AS id_sucursal
+           FROM caja.tbl_movcaja m
+             JOIN creditos.tbl_detpagocuota dp ON m.id_movimcaja = dp.id_movimcaja AND m.id_sucursal = dp.id_sucursal
+          WHERE m.pronto_pago = true AND m.id_estado = 1 AND dp.id_estado = 1) z ON c.id_cuotas = z.id_cuotas AND c.id_credito = z.id_credito AND c.id_sucursal_credito = z.id_sucursal
   ORDER BY c.nro_cuota;
 
 
@@ -11232,17 +11640,7 @@ AS
    INNER JOIN COMMON.TBL_COMPROBANTE C ON (c.id_comprobante=v.id_comprobante)
 
 
-
-select *from seguridad.v_usuario
-   select *from ventas.tbl_valesconsumo
-
-SELECT *FROM COMMON.TBL_COMPROBANTE
-
-
-select * from ventas.v_vales_creditos   where   fec_emision between '01/01/2014' and '29/01/2014'
-
-select * from ventas.v_vales_creditos  where id_cliente= '2009'   and   date_part('month'::text, fec_emision )=2 and id_familia::integer in (5,4,3)  order by id_venta,id_cliente::numeric,id_producto,nro_vale::numeric,  fec_emision::date
-
+  
 
 
 SELECT *
@@ -11806,7 +12204,7 @@ AS
 where c.nota__credito=false and c.nota__debito=false AND t.descripcion_larga ilike '%CREDITO%' and c.id_estado=1  and z.id__compra is null  --(z.id_estado is null or z.id_estado<>1)
 order by c.fec_ingalmacen
 
-select *from compras.tbl_compra
+select *from compras.v__nota__credito__proveedores
 
 
 CREATE OR REPLACE VIEW compras.v__nota__credito__proveedores
@@ -11875,7 +12273,10 @@ AS
     c.id_motivonotacredito,
     c.nota__debito,
     COALESCE(c.id__compra__ref,0) as id__compra__ref,
-    COALESCE(c.id__sucursal__ref,0) as id__sucursal__ref
+    COALESCE(c.id__sucursal__ref,0) as id__sucursal__ref,
+    mn.descripcion_larga as Motivo_notacredito,
+    z.fec_documento as fec_compra,
+    z.fec_ingalmacen as fec_ing_almacencompra
    FROM compras.tbl_compra c
    JOIN planillas.tbl_persona p ON p.id_persona::text = c.id_proveedor::text
    JOIN common.tbl_moneda m ON m.id_moneda = c.id_moneda
@@ -11886,6 +12287,15 @@ AS
    INNER JOIN PLANILLAS.TBL_PERSONA RES ON (RES.ID_PERSONA=C.ID_RESPONSABLE)
    INNER JOIN COMMON.TBL_TIPOCAMBIO TC ON (TC.ID_TIPOCAMBIO=C.ID_TIPOCAMBIO)
    inner JOIN COMMON.TBL_CONCEPTO CTO ON (CTO.id::text=C.ID__CONCEPTO)
+   INNER JOIN common.tbl_motivonotacredito mn on mn.id_motivonotacredito=c.id_motivonotacredito
+   left JOIN (
+	SELECT 
+		ID__COMPRA,
+		id_sucursalcompra ,
+		c.fec_documento,
+		c.fec_ingalmacen		
+	FROM COMPRAS.TBL_COMPRA C
+   ) z on z.ID__COMPRA=c.id__compra__ref and z.id_sucursalcompra=c.id__sucursal__ref
    where c.nota__credito=true --and c.nota__debito=false
    order by c.fec_ingalmacen
 
@@ -16252,8 +16662,7 @@ FROM  produccion.tbl_detordenproduc dp
 inner join almacen.tbl_precio pre on (pre.id_producto=dp.id_producto and pre.id_unidadventa=dp.id_unidadkardex and pre.id_listaprecio=dp.id_listaprecio)
 inner join almacen.tbl_producto p on (p.id_producto=dp.id_producto)
 
-
-select *from seguridad.v_usuario 
+ 
 
 
 CREATE OR REPLACE VIEW seguridad.v_usuario 
@@ -16301,6 +16710,11 @@ AS
    FROM seguridad.tbl_usuario u
    LEFT JOIN seguridad.v_usuarioalmacen ua ON ua.id_usuario = u.id_usuario AND ua.predeterminado = true
    inner join planillas.tbl_persona p on (p.id_persona=u.id_persona)
+
+
+select *from common.tbl_formapago
+
+select *from common.tbl_tipoventa
 
 select *from almacen.tbl_precio where id_producto='1382'
 select *from seguridad.v_usuario_colaborador
@@ -16379,7 +16793,8 @@ e.pwd_facturacion  ,
 e.smtp_facturacion ,
 trim(e.port_facturacion) as port_facturacion,
 e.endpoint_mobil,
-e.genera_mobil
+e.genera_mobil,
+correo_ssl
 from 
 seguridad.tbl_usuariosucursal us
 inner join common.tbl_sucursal s on (s.id_sucursal=us.id_sucursal)
@@ -16578,6 +16993,7 @@ AS
   LEFT JOIN (
      select id_facturacion ,id_sucursal,dfn.id_producto,dfn.id_unidadventa,dfn.cantidad,dfn.importe from  ventas.tbl_facturacion n
      inner join ventas.tbl_detfacturacion dfn on n.id_facturacion=dfn.id_facturacion and n.id_sucursal=dfn.id_sucursal 
+	where n.id_estado=1
      ) nc ON nc.id_facturacion = f.id_facturacionref AND f.id_sucursalref = nc.id_sucursal and nc.id_producto=df.id_producto and nc.id_unidadventa=df.id_unidadventa
 
   WHERE f.id_estado = 1 AND df.id_estado = 1/* AND NOT ((f.id_facturacion::text || f.id_sucursal::text) || btrim(df.id_producto::text) IN ( SELECT (ff.id_facturacionref::text || ff.id_sucursalref::text) || btrim(dff.id_producto::text)
@@ -18215,7 +18631,8 @@ AS
     pre.precio5,
     prod.cantidad_fraccionada,
     prod.afecto_icbper,
-    ex.stock_fisico
+    ex.stock_fisico,
+    prod.solicitadatosadicionales
    FROM almacen.tbl_producto prod
      JOIN almacen.tbl_marca m ON m.id_marca = prod.id_marca
      JOIN almacen.tbl_familia f ON f.id_familia = prod.id_familia
@@ -19834,13 +20251,17 @@ COALESCE(placa,'') as placa,
 COALESCE(capacidad,0) as capacidad,
 COALESCE(color,'') as color,
 ut.id_unidadtransporte,
-P.ID_PERSONA
+P.ID_PERSONA,
+ut.ruc,
+ut.razon_social,
+ut.direccion
 from 
 ventas.tbl_transportista t
 inner join planillas.tbl_persona p on (p.id_persona=t.id_persona)
 inner join ventas.TBL_UNIDADTRANSPORTE ut on (ut.id_unidadtransporte=t.id_unidadtransporte)
 
 select *from ventas.tbl_transportista
+select *from ventas.TBL_UNIDADTRANSPORTE
 
 CREATE OR REPLACE VIEW VENTAS.V__CLIENTES__X__VENDEDOR
 AS
@@ -20173,7 +20594,7 @@ seguridad.tbl_usuariodocumento ud
 inner join seguridad.tbl_proceso p on (p.id_proceso=ud.id_proceso)
 inner join common.tbl_comprobante cp on (cp.id_comprobante=ud.id_comprobante)
 inner join common.tbl_estado es on (es.id_estado=ud.id_estado)
-LEFT join  common.tbl_configserie cf on  cf.id_comprobante=ud.id_comprobante and cf.serie=ud.serie and cf.id_sucursal=ud.id_sucursal
+INNER join  common.tbl_configserie cf on  cf.id_comprobante=ud.id_comprobante and cf.serie=ud.serie and cf.id_sucursal=ud.id_sucursal
 order by p.id_proceso;
 
 

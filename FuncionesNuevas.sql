@@ -1,4 +1,6 @@
-﻿
+﻿estado_comproba
+fn_list_address
+
 fspiuselect * from ALMACEN.FN_PRODUCTOS_ALMACEN(1,'a',1)
 
  select * from contabilidad.list__libromayor(3,1,4,0,12)
@@ -7,7 +9,8 @@ select * from ventas.list_importeventasdiariasMensual(2017,1)
 
 select * from ALMACEN.ISP_DETELETEUNIDADINVENTARIO(1,'28',6,1,1,NULL,'0',NULL,NULL,'0')
 
-select *from compras.list_importecomprasdiariasmensual(2017,1);
+select *from compras.list_importecomprasdiariasmensual(20fn_list_address
+													   17,1);
 
 select *from compras.list_importecomprasProductomensual(2017,1)
 select *from compras.list_CantidadcomprasProductomensual(2017,1)
@@ -148,6 +151,1373 @@ select * from compras.fn_dscto_notacredito(32,1)
 
 select  *from planillas.fn_asistencia('','');
 
+select *from almacen.fn_get_existencias(0);
+
+select *from seguridad.fn_user_get('1')
+
+select * from common.tbl_estado
+
+select  *from ventas.fn_order_getbydelivery('1','')
+
+select *from ventas.fn_order_getbydelivery('','1');
+
+select * from ventas.fn_order_getbydelivery('1', '1')
+
+select  *from almacen.fn_getproducts_bysubsidiary('','','');
+
+
+select *from caja.list_caja_saldos('30/04/2021','08/05/2021')
+
+
+
+CREATE OR REPLACE FUNCTION almacen.tbl_datos_adicionales_producto_venta(
+	_id integer ,
+	_item integer,
+	_key text,
+	_value text,
+	_id_producto varchar(30),
+	_id_unidadventa integer,
+	_id_facturacion integer,
+	_id_sucursal integer,
+	_id_estado integer
+) RETURNS TEXT[] AS $$
+DECLARE
+	RES TEXT[];
+BEGIN
+	UPDATE almacen.tbl_datos_adicionales_producto_venta SET id_Estado=3 
+	where id_producto=_id_producto  and item=_item and id_facturacion=_id_facturacion and id_sucursal=_id_sucursal;
+	INSERT INTO almacen.tbl_datos_adicionales_producto_venta(
+		item,
+		key,
+		value,
+		id_producto,
+		id_unidadventa,
+		id_facturacion,
+		id_sucursal,
+		id_estado
+	)values(
+		_item,
+		_key,
+		_value,
+		_id_producto,
+		_id_unidadventa,
+		_id_facturacion,
+		_id_sucursal,
+		_id_estado
+	) ;
+	RES:=ARRAY['0','Registrado correctamente'];
+	IF NOT FOUND THEN
+		RES:=ARRAY['501','Ocurrio un erro al registrar datos adicionales ..Intente nuevamente'];
+	END IF;
+	
+return res;	
+END;$$
+LANGUAGE 'plpgsql';
+
+create or replace function caja.list_caja_saldos(
+	f1 text,
+	f2 text
+)
+returns table(
+	documento text,
+	dia integer,
+	mes integer,	
+	cliente text,
+	importe numeric(20,4)
+) as $$
+declare
+begin
+create temporary table temps(
+	documento text,
+	mes integer,
+	dia integer,
+	cliente text,
+	importe numeric(20,6)
+) on commit drop;
+insert into temps
+  select 
+	'' AS Documento,
+	0 as dia,
+	0 as mes,
+	'************ SALDO ANTERIOR *******************' as Mensaje,
+	 sum(imp_movimiento*(COALESCE(signo,1)))  as Importe	 
+	from caja.tbl_movcaja mov	
+	where fecha_mov<f1::date;
+	
+	insert into temps
+	select 
+		serie || '-'|| numero as documento ,
+			date_part('day',fecha_mov) as dia,
+		date_part('month',fecha_mov) as mes,
+		nomape_cliente as cliente,
+		sum(imp_movimiento*(COALESCE(signo,1))) as importe
+	from caja.tbl_movcaja mov	
+	where fecha_mov>=f1::date
+	group by serie,numero,nomape_cliente, fecha_mov 
+	order by mov.fecha_mov asc;
+	return query select *from temps ;
+end;$$
+language 'plpgsql';
+
+
+select *from caja.list_caja_acumulada('01/05/2021','11/05/2021')
+
+create or replace function caja.list_caja_acumulada(
+	f1 text,
+	f2 text
+)
+returns table(
+	op integer,
+	mensaje text,
+	fecha date,
+	dni text,
+	colaborador text,
+	apertura numeric(20,4),	
+	deposito numeric(20,4),
+	tarjeta numeric(20,4),
+	efectivo numeric(20,4),
+	egreso numeric(20,4),
+	saldo numeric(20,4)
+) as $$
+declare
+begin
+create temporary table temps(
+	op integer,
+	mensaje text,
+	fecha date,
+	dni text,
+	colaborador text,
+	apertura numeric(20,4),	
+	deposito numeric(20,4),
+	tarjeta numeric(20,4),
+	efectivo numeric(20,4),
+	egreso numeric(20,4),
+	saldo numeric(20,4)
+) on commit drop;
+insert into temps
+select  1 as op,
+		x .mensaje,
+		x.fecha,
+		x.dni,
+		x.colaborador,
+		sum(x.apertura) as apertura,
+		sum(x.deposito) as deposito,
+		sum(x.tarjeta) as tarjeta,
+		sum(x.efectivo) as efectivo ,
+		sum(x.egreso) as egreso 
+	from (
+  select 
+	'*********SALDO ANTERIOR*********' as mensaje,	
+	 f1::date as fecha,
+	  vend.doc_persona as dni,
+	  vend.nombre_razon as Colaborador,
+	 0 AS apertura,
+	 case when dmov.id_formapago='03' AND COALESCE(signo,1)=1 then imp_movimiento*(COALESCE(signo,1)) else 0 end as deposito,
+	 case when dmov.id_formapago='02' AND COALESCE(signo,1)=1 then imp_movimiento*(COALESCE(signo,1)) else 0 end as tarjeta,
+	 case when dmov.id_formapago='01' AND COALESCE(signo,1)=1 then imp_movimiento*(COALESCE(signo,1)) else 0 end as efectivo,
+	 case when mov.signo=-1 then imp_movimiento else 0 end as egreso	   
+	from caja.tbl_movcaja mov	
+	inner join planillas.tbl_persona vend on vend.id_persona=mov.id_persona
+	inner join caja.tbl_detmovpago dmov on mov.id_movimcaja=dmov.id_movimcaja  
+	where fecha_mov::date<f1::date and mov.id_estado=1
+	) x group by x.fecha,
+	x.dni,x.colaborador,x .mensaje;
+	 
+	
+	insert into temps
+	select 
+		2 as op,
+		x.colaborador,
+		x.fecha,
+		x.dni,
+		x.colaborador,
+		sum(x.apertura) as apertura,
+		sum(x.deposito) as deposito,
+		sum(x.tarjeta) as tarjeta,
+		sum(x.efectivo) as efectivo ,
+		sum(x.egreso) as egreso 
+	from (
+select 
+	 mov.fecha_mov::date as fecha,
+	 vend.doc_persona as dni,
+	 vend.nombre_razon as Colaborador,
+	 0 AS apertura,
+	 case when dmov.id_formapago='03' and COALESCE(signo,1)=1  then imp_movimiento else 0 end as deposito,
+	 case when dmov.id_formapago='02' and COALESCE(signo,1)=1 then imp_movimiento else 0 end as tarjeta,
+	 case when dmov.id_formapago='01' and COALESCE(signo,1)=1 then imp_movimiento else 0 end as efectivo,
+	 case when COALESCE(signo,1)=-1 then imp_movimiento else 0 end as egreso	   
+	from caja.tbl_movcaja mov	
+	inner join caja.tbl_detmovpago dmov on mov.id_movimcaja=dmov.id_movimcaja
+	inner join planillas.tbl_persona vend on vend.id_persona=mov.id_persona
+	where mov.id_estado=1 and fecha_mov::date>=f1::date  and fecha_mov::date<=f2::date
+) x 
+group by x.fecha::date,x.dni,x.colaborador
+order by x.fecha::Date asc;
+	return query select t.*from temps t order by  t.dni,t.op,t.fecha asc;
+end;$$
+language 'plpgsql';
+
+
+select * from planillas.tbl_persona
+select * from caja.tbl_movcaja mov where signo is not null
+
+
+SELECT  *FROM COMMON.TBL_FORMAPAGO
+
+CREATE OR REPLACE FUNCTION creditos.getfunccalmora(
+	_id_cuota integer)
+    RETURNS text
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+declare
+	data record;
+	mora numeric ;--double precision ;
+	saldo numeric(30,14) ;
+	return_mora numeric;
+begin
+mora:=0.00;
+select --generaIntereses(x.saldo,convertirTemToTead(2), CAST( now() AS DATE)-CAST(fec_vencimiento AS DATE)) 
+case when (CAST( now() AS DATE)-(CAST(fec_vencimiento AS DATE))-8)>0 then
+((x.saldo*0.1)/100)*(CAST( now() AS DATE)-(CAST(fec_vencimiento AS DATE))-8)
+else 0 end
+into mora from
+(select 
+cc.id_cuotas,
+cc.nro_cuota,
+CC.imp_cuota,
+fec_vencimiento::date, 
+trunc(CC.imp_cuota-COALESCE(imp_pago,0)- COALESCE(( SELECT sum(COALESCE(nc.imp_dscto, 0::numeric)) AS sum
+           FROM creditos.tbl_cuota_notacredito nc
+          WHERE cc.id_cuotas = nc.id_cuota AND cc.id_credito = nc.id_credito AND cc.id_sucursal_credito = nc.id_sucursal_cred AND nc.id_estado = 1), 0::numeric),2) as saldo
+ from creditos.tbl_cuota cc
+left join (
+	select  ccc.id_cuotas,ccc.id_credito,ccc.id_sucursal_credito,sum(dpc.imp_pago) as imp_pago from creditos.tbl_cuota ccc 
+	inner join creditos.tbl_detpagocuota dpc on ccc.id_cuotas=dpc.id_cuotas and ccc.id_credito=dpc.id_credito and  ccc.id_sucursal_credito=dpc.id_sucursal_credito
+	inner join caja.tbl_movcaja mov on  (mov.id_movimcaja=dpc.id_movimcaja and  mov.id_sucursal=dpc.id_sucursal)
+	where mov.id_estado=1 and dpc.id_estado=1
+	group by ccc.id_credito,ccc.id_sucursal_credito,ccc.id_cuotas
+) pagc on pagc.id_credito=cc.id_credito and  pagc.id_sucursal_credito=cc.id_sucursal_credito and pagc.id_cuotas=cc.id_cuotas
+) x
+where trunc(x.saldo,2)>0 and x.fec_vencimiento<now() and-- x.nro_cuota<>0 and 
+x.ID_CUOTAs=_id_cuota;
+
+
+	if mora is not Null then
+		return_mora:= MORA;
+		/*select   (CC.total_cuota+CC.importe_mora-COALESCE((SELECT sum(M.monto_total) FROM OPERACIONES.MOVIMIENTO M 
+		WHERE CC.IDCUOTA=M.IDCUOTA  and (m.anulado='0' or m.anulado='N') ) ,0)) into saldo  from creditos.cuota cc WHERE CC.IDCUOTA=_id_cuota;
+		if trunc(saldo,2)>0 then
+			--update creditos.cuota set importe_mora=mora where  IDCUOTA=_ID_CUOTA;
+			return_mora:= MORA;
+		ELSE
+			return_mora:=0;	
+		end if;*/
+		
+	else
+		return 0;
+	end if;
+return return_mora;	
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION almacen.fn_update_stock(
+	_product_id character varying,
+	_unit_id integer,
+	_stock numeric(20,4),
+	_reserva numeric(20,4)
+	)
+    RETURNS TABLE(statuscode integer, statusmessage text)     
+AS $$
+DECLARE 
+ res text;	
+BEGIN
+	 update almacen.tbl_existencia set stock_fisico=_stock,stock_reserva=_reserva where id_producto=_product_id and id_unidadventa=_unit_id;
+	 return query select 1 as statuscode,'Stock Actualizado' as statusmessage;
+
+END;$$
+LANGUAGE 'plpgsql';
+  
+select *from almacen.fn_update_stock('',1,0,0);
+select  *from almacen.fn_get_stock_mobil(5);
+select * from almacen.fn_get_stock_mobil(331,2)
+
+select * from almacen.fn_get_stock_mobil(2,333)
+
+select *from planillas.fn_list_customers(99,'',0);
+
+select  *from ventas.tbl_facturacion where numdoc_Facturacion::integer=26867 and id_comprobante=2
+
+
+update  ventas.tbl_facturacion set serie_facturacion='B001',id_comprobante=2 where numdoc_Facturacion::integer=26867 and id_comprobante=3
+
+
+
+
+
+
+create or replace   function planillas.fn_list_customers(
+	op integer,
+	_customerId text,
+	_addresId bigint
+)returns table(
+	customerId varchar(15),
+	estadoCivilId integer,
+	doc_persona varchar(12),
+	nombre_razon varchar(500),
+	razon_comercial varchar(200),
+	sexo char(1),
+	email varchar(100),
+	paguinaweb text,
+	fecha_nac timestamp,
+	tipo_persona boolean,
+	cliente_proveedor boolean,
+	deuda_confidencial boolean,
+	no_apto_credito boolean,
+	concientizado boolean,
+	copropietario boolean,
+	observaciones text,
+	estadoId integer,
+	vendtitularId char(15),
+	venSuplenteId char(15),
+	colaboradorId char(15),
+	imp_minimoventa numeric(20,4),
+	percep_cliente boolean,
+	agente_perceptor boolean,
+	coopropietarioId integer,
+	tipDocIdentidadId integer,
+	porcent_percepcion numeric(20,4),
+	persona_refId varchar(15),
+	direccion_refId  bigint,
+	facturar_a_clienteref boolean,
+	gestiona_lineacredito boolean,
+	address json
+) as $$
+declare
+begin
+return query select 
+	p.id_persona as customerId,
+	p.id_estadocivil as estadocivilId,
+	p.doc_persona,
+	p.nombre_razon,
+	p.razon_comercial,
+	p.sexo,
+	p.email,
+	p.paginaweb,
+	p.fecha_nac,
+	p.tipo_persona,
+	p.cliente_proveedor,
+	p.deuda_confidencial,
+	p.no_apto_credito,
+	p.concientizado,
+	p.copropietario,
+	p.observaciones,
+	p.id_estado as estadoId,
+	p.id_vendtitular  as  vendtitularId,
+	p.id_vendsuplente as vendsuplenteId,
+	p.id_cobrador cobradorId,
+	p.imp_minimoventa,
+	p.percep_cliente,
+	p.agente_perceptor,
+	0 as coopropietarioId,
+	p.id_tipdocidentidad as  tipdocidentidadId,
+	p.porcent_percepcion,
+	p.id_persona_ref as persona_refId,
+	p.id_direccion_ref as direccion_refId,
+	p.facturar_a_clienteref,
+	p.gestiona_lineacredito	,
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+      from (        
+       select 
+			dir.id_persona,
+			dir.id_direccion,
+			dir.direccion,
+			dir.referencia,
+			dir.id_sector,
+			dir.id_estado,
+			dir.id_direccion,
+			dir.id_tipvivienda
+		from ventas.tbl_direccion dir
+		where dir.id_persona=p.id_persona             
+      ) d
+    ) as Address
+	 from planillas.tbl_persona p	
+	 where p.id_persona=_customerId ;--and dir.id_direccion=_addresId;
+end;$$
+language 'plpgsql';
+
+
+CREATE OR REPLACE FUNCTION planillas.fn_list_address(
+	op integer,
+	_customerId text
+)
+returns table(
+	customerId varchar(15),
+	direccionId bigint,
+	direccion text,
+	referencia text,
+	id_sector integer,
+	id_estado integer,
+	id_direccion bigint,
+	id_tipvivienda integer
+) as $$
+declare
+begin
+return query select 
+	dir.id_persona,
+	dir.id_direccion,
+	dir.direccion,
+	dir.referencia,
+	dir.id_sector,
+	dir.id_estado,
+	dir.id_direccion,
+	dir.id_tipvivienda
+from ventas.tbl_direccion dir
+where dir.id_persona=_customerId;
+end;$$
+language 'plpgsql';
+
+select  *from ventas.tbl_direccion
+select *from  planillas.tbl_persona
+
+
+select  *from seguridad.tbl_usuario
+create or replace function almacen.fn_get_stock_mobil(
+	op integer,
+	order_id bigint
+)
+returns table (
+	producto_id varchar(30),
+	unit_id integer,
+	stock numeric(20,6),
+	reserva numeric(20,2),
+	preventa_id bigint
+) as $$
+declare 
+begin
+	if op=1 then
+		return query select e.id_producto,e.id_unidadventa,stock_fisico,stock_reserva,id_cotizapreventa from almacen.tbl_existencia e
+		inner join ventas.tbl_detpreventacotiza dc on e.id_producto=dc.id_producto 
+		where dc.id_cotizapreventa=order_id;
+	end if;
+	if op=2 then
+		return query select e.id_producto,e.id_unidadventa,stock_fisico,stock_reserva,id_facturacion::bigint as id_facturacion from almacen.tbl_existencia e
+		inner join ventas.tbl_detfacturacion dc on e.id_producto=dc.id_producto 
+		where dc.id_facturacion=order_id;
+	end if;
+end;$$
+language 'plpgsql';
+
+select *from almacen.fn_get_stock_mobil(5);
+
+select *from almacen.tbl_existencia
+
+CREATE OR REPLACE FUNCTION ventas.fn_rentabilidad_x_producto(
+	op integer,
+	_id_empresa integer,
+	_f_desde character varying,
+	_f_hasta character varying,
+	_id_familia character varying)
+    RETURNS TABLE(
+	id_producto text, 
+	producto text, 
+	familia text, 
+	marca text, 
+	unidad text, 
+	valor numeric, 
+	cantidad numeric, 
+	precio numeric, 
+	total_venta numeric, 
+	precio_compra numeric, 
+	total_compra numeric, 
+	codigo text, 
+	cod_barra text
+) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+declare
+  begin
+  if op=1 then
+	return query select 
+x.id_producto::text,
+x.producto::text,
+x.familia:: text as familia,
+x.marca::text,
+x.unidad::text,
+x.valor,
+x.cantidad,
+x.importe/x.cantidad as precio,
+x.total_venta,
+x.costo/x.val_unidad as precio_compra,
+(x.costo/x.val_unidad )*x.cantidad as total_compra,
+x.codigo::text,
+x.codigo_barra::text
+
+ from (sELECT 
+		P.ID_PRODUCTO,
+		P.DESCRIPCION_LARGA AS PRODUCTO,
+		FA.DESCRIPCION_LARGA AS FAMILIA,
+		M.DESCRIPCION_LARGA AS MARCA,
+		U.DESC_LARGA AS UNIDAD,
+		DP.VAL_UNIDAD AS VALOR,
+		SUM(x.cantidad) as cantidad,
+		sum(df.importe) as importe,
+		SUM(DF.importe) AS TOTAL_VENTA,
+		sum(df.costo) as costo,
+		sum(df.val_unimedventa) as val_unidad,
+		p.codigo::text as codigo,
+		DDP.codigo_barra::text as codigo_barra
+		FROM VENTAS.TBL_FACTURACION F
+		INNER JOIN VENTAS.TBL_DETFACTURACION DF ON (F.ID_FACTURACION=DF.ID_FACTURACION and f.id_sucursal=df.id_sucursal)
+		INNER JOIN ALMACEN.TBL_DETPRODUCTO DDP ON(DDP.ID_PRODUCTO=DF.ID_PRODUCTO and ddp.unidad_inventario=true)
+		JOIN LATERAL almacen.fn_stock(df.id_producto, df.id_unidadventa, df.id_almacen, df.cantidad) x(product_id, unit_id, val_unit, stock, cantidad) ON (((x.product_id)::text = (ddp.id_producto)::text))
+		inner join ALMACEN.TBL_PRECIO DP ON DP.ID_PRODUCTO=DF.ID_PRODUCTO AND DP.ID_UNIDADVENTA=X.UNIT_ID
+		INNER JOIN ALMACEN.TBL_PRODUCTO P ON(P.ID_PRODUCTO=DP.ID_PRODUCTO)
+		INNER JOIN ALMACEN.TBL_FAMILIA FA ON (FA.ID_FAMILIA=P.ID_FAMILIA)
+		INNER JOIN ALMACEN.TBL_MARCA M ON (M.ID_MARCA=P.ID_MARCA)
+		JOIN almacen.tbl_unidad u ON ((u.id_unidadventa = x.unit_id))
+		INNER JOIN COMMON.TBL_SUCURSAL SUC ON SUC.ID_SUCURSAL=F.ID_SUCURSAL
+		LEFT JOIN (SELECT 
+				FF.ID_FACTURACIONREF AS ID_FACTURACION,
+				FF.ID_SUCURSALREF AS ID_SUCURSAL,
+				DFF.ID_PRODUCTO,DFF.ID_UNIDADVENTA,
+				DFF.ID_PRODUCTO AS _ID_PRODUCTO ,
+				SUM(DFF.CANTIDAD) AS CANTIDAD,
+				SUM(DFF.importe)  AS IMPORTE				
+			FROM VENTAS.TBL_FACTURACION FF 
+			INNER JOIN VENTAS.TBL_DETFACTURACION DFF ON FF.ID_FACTURACION =DFF.ID_FACTURACION AND FF.ID_SUCURSAL=DFF.ID_SUCURSAL
+			WHERE FF.NOTA_CREDITO=TRUE
+			GROUP BY 
+			        FF.ID_FACTURACIONREF,
+				FF.ID_SUCURSALREF,
+				DFF.ID_PRODUCTO,
+				DFF.ID_UNIDADVENTA,
+				DFF.ID_PRODUCTO 
+			) Z ON Z.ID_FACTURACION=F.ID_FACTURACION AND Z.ID_SUCURSAL=F.ID_SUCURSAL AND DF.ID_PRODUCTO=Z._ID_PRODUCTO AND Z.ID_UNIDADVENTA=DF.ID_UNIDADVENTA	 
+		where f.id_estado=1 and df.id_estado=1 
+		AND SUC.ID_EMPRESA=_ID_EMPRESA AND F.FECHA_VENTA::DATE>=_f_desde::DATE AND F.FECHA_VENTA::DATE<=_f_hasta::DATE AND F.NOTA_CREDITO=FALSE
+		--AND F.ID_FACTURACION::TEXT || F.ID_SUCURSAL::TEXT NOT IN (SELECT FF.ID_FACTURACIONREF::TEXT || FF.ID_SUCURSALREF::TEXT FROM VENTAS.TBL_FACTURACION FF WHERE FF.NOTA_CREDITO=TRUE and ff.id_estado=1 )
+		GROUP BY P.ID_PRODUCTO,
+		P.DESCRIPCION_LARGA ,
+		Fa.DESCRIPCION_LARGA ,
+		M.DESCRIPCION_LARGA ,
+		U.DESC_LARGA ,
+		DP.VAL_UNIDAD,
+		dp.id_producto,
+		dp.id_unidadventa,		
+		z.cantidad,z.importe,DDP.codigo_barra
+		ORDER BY Fa.DESCRIPCION_LARGA
+		) as x;
+end if;
+if op=2 then
+	return query SELECT 
+		P.ID_PRODUCTO,
+		P.DESCRIPCION_LARGA AS PRODUCTO,
+		FA.DESCRIPCION_LARGA AS FAMILIA,
+		M.DESCRIPCION_LARGA AS MARCA,
+		U.DESC_LARGA AS UNIDAD,
+		DP.VAL_UNIDAD AS VALOR,
+		SUM(DF.CANTIDAD) AS CANTIDAD,
+		AVG(DF.PRECIO) AS PRECIO,
+		AVG(DF.PRECIO)*SUM(DF.CANTIDAD) AS TOTAL_VENTA,
+		dp.coste AS precio_compra,
+		dp.coste*SUM(DF.CANTIDAD) as total_compra,
+		p.codigo::text as codigo,
+		DDP.codigo_barra::text as codigo_barra
+		FROM VENTAS.TBL_FACTURACION F
+		INNER JOIN VENTAS.TBL_DETFACTURACION DF ON (F.ID_FACTURACION=DF.ID_FACTURACION and f.id_sucursal=df.id_sucursal)
+		INNER JOIN ALMACEN.TBL_PRECIO DP ON(DP.ID_PRODUCTO=DF.ID_PRODUCTO AND DP.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)
+		INNER JOIN ALMACEN.TBL_DETPRODUCTO DDP ON(DP.ID_PRODUCTO=DF.ID_PRODUCTO AND DDP.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)
+		INNER JOIN ALMACEN.TBL_PRODUCTO P ON(P.ID_PRODUCTO=DP.ID_PRODUCTO)
+		INNER JOIN ALMACEN.TBL_FAMILIA FA ON (FA.ID_FAMILIA=P.ID_FAMILIA)
+		INNER JOIN ALMACEN.TBL_MARCA M ON (M.ID_MARCA=P.ID_MARCA)
+		INNER JOIN ALMACEN.TBL_UNIDAD U ON (U.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)  
+		INNER JOIN COMMON.TBL_SUCURSAL SUC ON SUC.ID_SUCURSAL=F.ID_SUCURSAL
+		where f.id_estado=1 and df.id_estado=1 and fa.id_familia=_id_familia AND SUC.ID_EMPRESA=_ID_EMPRESA AND F.FECHA_VENTA::DATE BETWEEN _f_desde::DATE AND _f_hasta::DATE
+		GROUP BY P.ID_PRODUCTO,
+		P.DESCRIPCION_LARGA ,
+		Fa.DESCRIPCION_LARGA ,
+		M.DESCRIPCION_LARGA ,
+		U.DESC_LARGA ,
+		DP.VAL_UNIDAD,
+		dp.id_producto,
+		dp.id_unidadventa,
+		dp.coste,DDP.codigo_barra
+		ORDER BY Fa.DESCRIPCION_LARGA;
+end if;
+  end;
+$BODY$;
+select * from ventas.fn_rentabilidad_x_producto(1,1,'01/03/2021','27/03/2021','1    ')
+
+create or replace function almacen.update_costo()
+returns text as  $$
+declare
+  det record;
+  dat record;
+begin
+ CREATE TEMPORARY TABLE temp_data(
+	id_producto text,
+	id_unidad integer,
+	val_unidad numeric(20,4),
+	costo numeric(20,6),
+	fecha TIMESTAMP
+ )
+ ON COMMIT DROP;
+
+  CREATE  TABLE temp_data_costos(
+	id_producto text,
+	id_unidad integer,
+	val_unidad numeric(20,4),
+	costo numeric(20,6),
+	fecha TIMESTAMP
+ );
+for det in select * from almacen.list_kardex_batch('01/11/2017','27/11/2021',1,1) loop
+	INSERT INTO temp_data(id_producto,id_unidad,val_unidad,costo,fecha)VALUES(DET.codarti,det.idunimed,0,det.c_unid3,det.fecha);
+	/*update almacen.tbl_detfacturacion set costo=det.c_unid3 from ventas.facturacion fac
+	where fac.id_facturacion=tbl_detfacturacion.id_facturacion 
+	and fac.id_sucursal=tbl_detfacturacion.id_facturacion 
+	and det.codarti=tbl_detfacturacion.id_producto and */
+end loop;
+
+for dat in select * from temp_data loop
+	insert into temp_data_costos
+	select  id_producto,id_unidadventa,val_unidad,dat.costo*val_unidad,dat.fecha from almacen.tbl_precio where id_producto=dat.id_producto;
+end loop;
+
+
+update ventas.tbl_detfacturacion set costo=pre.costo,val_unimedventa=pre.val_unidad 
+from temp_data_costos pre 
+where tbl_detfacturacion.id_producto=pre.id_producto and 
+tbl_detfacturacion.id_unidadventa=pre.id_unidad and tbl_detfacturacion.fecha::date=pre.fecha::date;-- and tbl_detfacturacion.id_producto not in ('603','92')
+
+
+
+return '';
+end;$$
+language 'plpgsql';
+
+select almacen.update_costo();
+
+CREATE OR REPLACE FUNCTION almacen.fn_getproducts_bysubsidiary(
+	_enterpriseid character varying,
+	_categoryid character varying,
+	_subsidiaryid character varying)
+    RETURNS TABLE(
+	resourceid varchar(20), 
+	productname varchar(200), 
+	description text, 
+	logo text, 
+	price numeric(20,6), 
+	stock text, 
+	ispromotion boolean,
+	statusId integer,
+	code char(30),
+	family varchar(100),
+	unit text
+) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE _categoria integer;
+BEGIN
+/*
+	select a.id into _categoria
+	from delivery.category a
+	where a.uuid = _categoryid;*/
+--select  *from almacen.v_productosalmacen
+--select *from almacen.tbl_producto
+	RETURN QUERY
+		SELECT 	
+			a.id_producto as productoid, 
+			a.producto as productname, 
+			p.caracteristicas as descripcion,
+			null as logo, 
+			a.precio1 as price, 
+			coalesce(a.disponible ,'0') as stock, 
+			false as promotion,
+			p.id_estado,
+			p.codigo,
+			a.famila,
+			coalesce(a.unidad::text,'-') as unidad
+		FROM almacen.v_productosalmacen a 
+		inner join almacen.tbl_producto p on p.id_producto=a.id_producto
+		--inner join delivery.subsidiary s on a.subsidiary_id = s.id
+		where a.id_estado=1 and p.descripcion_larga ilike '%' || _categoryid || '%'  ;
+				/*and s.status
+				and a.category_id=_categoria 
+				and s.enterprise_id = _enterpriseid
+				and s.uuid = _subsidiaryid;*/
+END;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION ventas.fn_order_getbydelivery(
+	_enterprise_id character varying,
+	_delivery_id character varying)
+    RETURNS TABLE(
+	resourceid bigint, 
+	document_type varchar(30), 
+	payment_method varchar(20), 
+	order_satus_id integer, 
+	order_satus varchar(20), 
+	order_number text, 
+	full_name varchar(500), 
+	resource_user varchar(15), 
+	phone_number text, 
+	order_date character varying, 
+	ubigeo_destination varchar(8), 
+	address_destination text, 
+	reference_destination text, 
+	x numeric(20,12), 
+	y numeric(20,12), 
+	amount numeric(20,6), 
+	tax numeric(20,6), 
+	discount numeric(20,6), 
+	total_amount numeric(20,6), 
+	document_number varchar(12), 
+	business_name varchar(500), 
+	address text, 
+	document_ref text, 
+	delivery_amount numeric
+) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+---select  *from common.tbl_tipoventa
+    return query 
+        select  a.id_cotizapreventa as resourceid,
+                c.descripcion_larga as document_type,
+                d.descripcion_larga as payment_method,
+                s.id_estado order_satus_id,
+                s.des_estado as order_satus,
+                a.serie || '-' ||numero as order_number,
+                b.nombre_razon as full_name,
+		b.id_persona as resource_user,
+		COALESCE(b.phone_number,'') as phone_number,
+                cast(CASE WHEN a.fecha IS NULL THEN '' ELSE to_char(a.fecha, 'DD/MM/YYYY') END as character varying) as order_date,
+                dis.id_distrito  as ubigeo_destination,
+                dir.direccion as address_destination,
+                dir.referencia as reference_destination,
+                a.x_destination as x,
+                a.y_destination as y,
+                a.imp_bruto as amount,
+                a.imp_igv as tax,
+                a.imp_dscto as discount,
+                a.imp_total as total_amount,
+                b.doc_persona as document_number,
+                b.nombre_razon as business_name,
+                dir.direccion as address,
+                '' as document_ref,
+		coalesce(a.delivery_amount, 0)
+        from ventas.tbl_cotizacionpreventa a 
+        inner join planillas.tbl_persona b on a.id_cliente = b.id_persona
+        inner join ventas.tbl_direccion dir on dir.id_direccion=a.id_direccion and dir.id_persona=a.id_cliente
+        inner join ventas.tbl_sector sec on sec.id_sector=dir.id_sector
+        inner join ventas.tbl_zona z on z.id_zona=sec.id_zona
+        inner join common.tbl_distrito dis on dis.id_distrito=z.id_distrito
+        inner join common.tbl_provincia prov on prov.id_provincia=dis.id_provincia
+        inner join common.tbl_dpto dpto on dpto.id_dpto=prov.id_dpto
+        inner join planillas.tbl_persona delivery on a.id_vendedor = delivery.id_persona
+        inner join common.tbl_comprobante c on a.id_comprobante = c.id_comprobante 
+        inner join common.tbl_tipoventa d on a.id_tipoventa = d.id_tipoventa 
+        inner join common.tbl_estado s on a.id_estado= s.id_estado
+        where delivery.id_persona= _delivery_id --and  a.enterprise_id = _enterprise_id
+              --and delivery.order_status in(1,2,3)
+        order by a.id_cotizapreventa desc;
+        --limit 20;
+        
+
+END;
+$BODY$;
+ 
+
+CREATE OR REPLACE FUNCTION ventas.fn_order_change_status(
+	_enterprise_id character varying,
+	_order_id character varying,
+	_status_id character varying)
+    RETURNS TABLE(statuscode integer, statusmessage text) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE 
+	new_status_name character varying;
+	order_status integer;
+	status_name character varying;
+	uniqueid bigint;
+BEGIN
+	--select  *from common.tbl_estado
+	select a.id_estado, a.des_estado into order_status, new_status_name
+	from common.tbl_estado a
+	where a.id_estado = _status_id::integer;
+	
+	order_status := COALESCE(order_status,0);
+	
+	if(order_status = 0 ) then
+		return query 
+			select 0 as statuscode,
+					'Estado a cambiar de la orden es inválido' as statusmessage;
+					
+	else
+		select b.des_estado, a.id_cotizapreventa into status_name, uniqueid
+		from ventas.tbl_cotizacionpreventa a inner join common.tbl_estado b
+		on a.id_estado = b.id_estado
+		where a.id_cotizapreventa = _order_id::bigint;-- and a.enterprise_id = _enterprise_id;
+	
+		if(status_name = 'ACTIVO' and new_status_name='ANULADO')then
+			update ventas.tbl_cotizacionpreventa
+				set id_estado = order_status
+			where id_cotizapreventa = uniqueid::bigint;-- uuid = _order_id and enterprise_id = _enterprise_id;
+
+			return query 
+				select 1 as statuscode,
+						'Estado de Orden cambiado' as statusmessage;
+		else 
+            if(status_name <> 'registrado' and new_status_name = '')then
+               
+                return query 
+                    select 0 as statuscode,
+                            'Solo se pueden cancelar las ordenes que esten con estado registrado.' as statusmessage;
+
+			else 
+                update ventas.tbl_cotizacionpreventa
+                    set id_estado = order_status
+                where id_cotizapreventa = uniqueid::bigint;-- uuid = _order_id and enterprise_id = _enterprise_id;
+
+				if(new_status_name = 'editar') then
+					update ventas.tbl_detpreventacotiza
+						set status = false
+					where id_cotizapreventa = uniqueid::bigint;
+				end if;
+
+                return query 
+                    select 1 as statuscode,
+                            'Estado de Orden cambiado -' || order_status::TEXT as statusmessage;
+		    end if;	
+		end if;	
+	end if;
+
+END;
+$BODY$;
+
+"ANULADO"
+ select * from ventas.fn_order_detail('', '3467');
+select  *from common.tbl_estado
+select id_estado as resourceid, des_estado as status, des_estado as label from common.tbl_estado where est_estado
+
+CREATE OR REPLACE FUNCTION ventas.fn_order_detail(
+	_enterprise_id character varying,
+	_order_id character varying)
+    RETURNS TABLE(
+	product_id varchar(20), 
+	product_name varchar(200), 
+	product_desc varchar(200), 
+	quantity numeric(20,4), 
+	price numeric(20,4), 
+	tax numeric(20,4), 
+	discount numeric(20,4), 
+	total_amount numeric(20,4)
+	) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+
+	return query 
+		select 
+			c.id_producto uuid, 
+			c.descripcion_larga  as name, 
+			c.descripcion_larga as descripcion, 
+			a.cantidad as quantity, 
+			a.precio as price, 
+			(a.imp_total-a.imp_igv)::numeric(20,4) as tax, 
+			a.imp_dscto as discount, 
+			a.imp_total as total_amount
+		from ventas.tbl_detpreventacotiza a 
+		inner join ventas.tbl_cotizacionpreventa b on a.id_cotizapreventa = b.id_cotizapreventa
+		inner join almacen.tbl_precio pre on pre.id_producto=a.id_producto and pre.id_unidadventa=a.id_unidadventa 
+		inner join almacen.tbl_producto c on pre.id_producto = c.id_producto
+		where b.id_estado=1 and b.id_cotizapreventa = _order_id::bigint ;--and c.id_empresa = _enterprise_id::ineteger;
+		
+
+END;
+$BODY$;
+
+ 
+
+CREATE OR REPLACE FUNCTION seguridad.fn_user_get(
+	_uuid character varying)
+    RETURNS TABLE(
+	resourceid char(5), 
+	documenttypeid integer, 
+	documenttype character varying, 
+	document_number character varying, 
+	name varchar(50), 
+	last_name text, 
+	full_name varchar(500), 
+	sex integer, 
+	bird_date character varying, 
+	phone_number text, 
+	mobile_number text, 
+	email varchar(100), 
+	ubigeo varchar(8), 
+	des_ubigeo varchar(30), 
+	address text, 
+	reference text, 
+	date_insert character varying, 
+	date_update character varying, 
+	login_type text
+) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+	SET TIMEZONE = 'America/Lima';
+	
+	return query 
+		select	a.id_usuario as resourceid, 
+			b.id_tipdocidentidad as documenttypeid, 
+			b.descripcion_larga as documenttype, 
+			p.doc_persona as document_number, 
+			p.nombres as name, 
+			p.apell_paterno || ' ' || p.apell_materno as last_name, 
+			p.nombre_razon as full_name, 
+			CASE WHEN p.sexo='M' THEN 1 ELSE 2 END as sex, 
+			cast(case when p.fecha_nac is null then '' else to_char(p.fecha_nac,'dd/MM/yyyy') end as character varying) as bird_date, 
+			'' as phone_number, 
+			'' as mobile_number, 
+			p.email, 
+			dis.id_distrito as ubigeo, 
+			dis.distrito as des_ubigeo, 
+			dir.direccion as  address, 
+			dir.referencia as reference, 
+			cast(to_char(p.fecha_reg,'dd/MM/yyyy hh:mm:ss') as character varying) as date_insert, 
+			cast(case when now() is null then '' else to_char(now(),'dd/MM/yyyy hh:mm:ss') end as character varying) as date_update, 
+			'Login' as login_type
+			FROM seguridad.tbl_usuario a
+			inner join Planillas.tbl_persona p on p.id_persona=a.id_persona
+			inner join ventas.tbl_direccion dir on dir.id_persona=p.id_persona
+			inner join ventas.tbl_sector s on s.id_sector=dir.id_sector
+			inner join ventas.tbl_zona z on z.id_zona=s.id_zona
+			inner join common.tbl_distrito dis on dis.id_distrito=z.id_distrito
+			inner join planillas.tbl_tipdocidentidad b on p.id_tipdocidentidad = b.id_tipdocidentidad
+			where a.id_usuario = _uuid;
+	
+END;
+$BODY$;
+
+select *from planillas.tbl_persona
+select *from seguridad.tbl_usuario a
+select *from seguridad.fn_login_user('1','admin','admin',1)
+
+CREATE OR REPLACE FUNCTION seguridad.fn_login_user(
+	_enterprise_id character varying,
+	_login_user character varying,
+	_login_pwd character varying,
+	_user_type integer)
+    RETURNS TABLE(statuscode integer, statusmessage text, resourceid text) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE
+--	_enterprise_uuid character varying;
+	_resource_id character varying;
+	_enterpriseid integer;
+	_user_type_id integer;
+BEGIN
+--SELECT a.uuid into _enterprise_uuid
+--	FROM db_coma.configuration.enterprise a
+--	where a.uuid = _enterprise_id;
+--select  *from seguridad.tbl_usuario
+SELECT a.id_usuario as uuid, a.id_empresa as enterprise_id, 2 as user_type_id into _resource_id, _enterpriseid, _user_type_id
+	FROM seguridad.tbl_usuario a
+	where a.camp2 = _login_user and a.camp1 = _login_pwd;
+
+	IF(exists(
+			SELECT 1
+			FROM seguridad.tbl_usuario a 
+			where a.camp2 = _login_user
+			and a.camp1 = _login_pwd
+			and a.id_empresa::text = _enterprise_id
+		)
+	  )
+	  then
+		if(_enterpriseid::text = _enterprise_id::text and _user_type_id = _user_type)then
+			return 
+				query 
+					select 1 as statuscode,
+							'Acceso exitoso.' as statusmessage, cast(_resource_id as text) as resourceid;
+			else
+			return 
+				query 
+					select 0 as statuscode,
+							'Usuario/Contraseña incorrecto.'  as statusmessage, '' as resourceid;
+		end if;
+	else
+		return 
+			query 
+				select 0 as StatusCode,
+					'Su cuenta no existe.' as StatusMessage, '' as resourceid;
+	end if;
+END;
+$BODY$;
+
+
+select * from common.fn_enterprise_getbyid('1');
+
+CREATE OR REPLACE FUNCTION common.fn_enterprise_getbyid(
+	_resourceid character varying)
+    RETURNS TABLE(
+	resourceid integer, 
+	identification_type_id integer, 
+	identification_type text, 
+	document_number char(12), 
+	district_id character varying, 
+	district text, 
+	company_name character varying, 
+	trade_name text, 
+	address character varying, 
+	web text, 
+	logo text, 
+	phone text, 
+	email text, 
+	date_create character varying, 
+	date_update character varying
+) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+	RETURN QUERY
+		SELECT 
+		a.id_empresa as uuid, 
+		1 as identification_type_id, 
+		'RUC' AS name, 
+		a.ruc as document_number, 
+		dis.id_distrito as district_id, 
+		trim(dis.distrito) || ' - ' || trim(prov.provincia) || ' - ' || trim(dep.departamento) as district,
+		a.nombre as company_name,  
+		'' as trade_name, 
+		a.direccion as  address, 
+		'' as web, 
+		encode(null, 'base64') as logo, 
+		'' as phone, 
+		'' as email,
+		cast(to_char(now(),'dd/MM/yyyy hh:mm:ss') as character varying) as date_create, 
+		cast(case when a.date_update is null then '' else to_char(now(),'dd/MM/yyyy hh:mm:ss') end as character varying) as date_update
+		FROM common.tbl_empresa A 
+			inner join ventas.tbl_sector s on s.id_sector=a.id_sector
+			inner join ventas.tbl_zona z on z.id_zona=s.id_zona 
+			inner join common.tbl_distrito dis on dis.id_distrito = z.id_distrito
+			inner join common.tbl_provincia prov on dis.id_provincia= prov.id_provincia 
+			inner join common.tbl_dpto dep on prov.id_dpto = dep.id_dpto
+		where a.id_empresa = _resourceid::integer;
+END;
+$BODY$;
+
+select *from common.tbl_provincia
+select *from  ventas.tbl_zona
+select  *from common.tbl_empresa
+
+select  *from common.fn_autocomplete_district('','');
+CREATE OR REPLACE FUNCTION common.fn_autocomplete_district(
+	_enterprise_uuid character varying,
+	_district character varying)
+    RETURNS TABLE(resourceid character varying, district character varying) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+BEGIN
+	RETURN QUERY
+		select 	c.id_distrito as resourceid, 
+				cast(trim(c.distrito) || ' - ' || trim(b.provincia) || ' - ' || trim(a.departamento) as character varying) as distrito
+		from   common.tbl_dpto a 
+		inner join common.tbl_provincia b on a.id_dpto = b.id_dpto 
+		inner join common.tbl_distrito c on b.id_provincia = c.id_provincia
+		where c.distrito ilike'%'|| _district ||'%'
+		order by c.distrito
+		limit 10;
+END;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION almacen.fn_get_existencias(
+	_id_empresa integer
+)
+returns table(
+	statuscode integer, 
+	statusmessage text,
+	data text
+) as  $$
+declare
+begin
+ return query select 1 as statuscode, 'Productos Recuperados' statusmessage ,row_to_json(t)::text as data
+from (
+  select  
+    (
+	 select array_to_json(array_agg(row_to_json(d)))
+      from (
+        
+       select *
+       from almacen.tbl_existencia dir -- select  *from ventas.v_direccion
+       
+       --where dir.id_persona=p.id_persona
+      
+       
+      ) d
+    ) as exsistencias
+   
+		 
+) t;
+end;$$
+language 'plpgsql';
+
+select  *from planillas.tbl_coordinatehistory
+
+select id_producto, *from almacen.tbl_existencia
+
+CREATE OR REPLACE FUNCTION planillas.fn_coordinate_history_add(
+	_enterprise_id integer,
+	_order_id bigint ,
+	_user_id bigint,
+	_date timestamp without time zone,
+	_x numeric,
+	_y numeric)
+    RETURNS TABLE(statuscode integer, statusmessage text) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
+DECLARE 
+	uniqueid integer;
+	delivery_id integer;
+BEGIN
+		 
+		insert into planillas.tbl_coordinatehistory (user_id, order_id, date_insert, coddia, x, y)
+		values(_user_id::text, _order_id, _date, cast( to_char(_date,'yyyymmdd') as int) , _x, _y);
+		
+		return query 
+				select 1 as statuscode,
+						'Coordenada Registrada' as statusmessage;
+						
+END;
+$BODY$;
+
+select *from planillas.tbl_coordinatehistory
+
+CREATE OR REPLACE FUNCTION compras.isp_ordencompra(
+	op integer,
+	_id_cotizaorden bigint,
+	_fecha_registro text,
+	_fecha_entrega text,
+	_serie character,
+	_numero character,
+	_id_tipoventa integer,
+	_id_responsablecompra character varying,
+	_id_solicitoordencompra character varying,
+	_lugar_entrega text,
+	_id_comprobante integer,
+	_id_moneda integer,
+	_id_tipocambio integer,
+	_id_operacion integer,
+	_id_dirproveedor bigint,
+	_id_proveedor character varying,
+	_id_direccionfactura bigint,
+	_id_clientefactura character varying,
+	_imp_bruto numeric,
+	_imp_dscto numeric,
+	_valor_venta numeric,
+	_imp_persepcion numeric,
+	_imp_igv numeric,
+	_imp_total numeric,
+	_id_igv integer,
+	_observaciones text,
+	_id_estado integer,
+	_id_usuario character,
+	_id_sucursal integer,
+	_tipo_cambio numeric,
+	_total_dolares numeric)
+    RETURNS text[]
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+	correl integer;
+	res text[];
+	
+BEGIN
+if op=1 then
+	if exists(select *from  ventas.tbl_direccion where id_persona=_id_proveedor and id_direccion=_id_dirproveedor)then
+		if exists(select *from planillas.tbl_persona where id_persona=_id_responsablecompra)then
+			select max(id_cotizaorden) into correl from compras.tbl_ordencotizacompra;
+			if correl is null then
+				correl:=1;
+			else
+				correl:=correl+1;
+			end if;
+			_id_cotizaorden:=correl;
+			INSERT INTO compras.tbl_ordencotizacompra(
+				id_cotizaorden, 
+				fecha_registro, 
+				fecha_entrega, 
+				serie, 
+				numero, 
+				id_tipoventa, 
+				id_responsablecompra, 
+				id_solicitoordencompra, 
+				lugar_entrega, 
+				id_comprobante, 
+				id_moneda, 
+				id_tipocambio, 
+				id_operacion, 
+				id_dirproveedor, 
+				id_proveedor, 
+				id_direccionfactura, 
+				id_clientefactura, 
+				imp_bruto, 
+				imp_dscto, 
+				valor_venta, 
+				imp_persepcion, 
+				imp_igv, 
+				imp_total, 
+				id_igv, 
+				observaciones, 
+				id_estado, 
+				id_usuario, 
+				fec_actualiza, 
+				id_usuarioactualiza, 
+				id_sucursal,
+				tipo_cambio,
+				total_dolares
+			)
+			VALUES (
+				_id_cotizaorden, 
+				to_timestamp(_fecha_registro,'YYYY-MM-DD HH24:MI:SS.MS'), 
+				to_timestamp(_fecha_entrega,'YYYY-MM-DD HH24:MI:SS.MS'), 
+				_serie, 
+				_numero, 
+				_id_tipoventa, 
+				_id_responsablecompra, 
+				_id_solicitoordencompra, 
+				_lugar_entrega, 
+				_id_comprobante, 
+				_id_moneda, 
+				_id_tipocambio, 
+				_id_operacion, 
+				_id_dirproveedor, 
+				_id_proveedor, 
+				_id_direccionfactura, 
+				_id_clientefactura, 
+				_imp_bruto, 
+				_imp_dscto, 
+				_valor_venta, 
+				_imp_persepcion, 
+				_imp_igv, 
+				_imp_total, 
+				_id_igv, 
+				_observaciones, 
+				_id_estado, 
+				_id_usuario, 
+				now(), 
+				_id_usuario, 
+				_id_sucursal,
+				_tipo_cambio,
+				_total_dolares
+			)returning array['0',id_cotizaorden::text] into res;
+			if not found then
+				res:=array['504','Inconsistencia inesperada al registrar al cabecera de la orden de compra '];
+			end if;
+		else
+			res:=array['503','Seleccione el responsable para realizar esta operación'];
+		end if;
+	else
+		res:=array['503','Seleccione el proveedor que sera dirigida la orden de compra'];
+	end if;
+end if;
+if op=2 then
+	if exists(select *from compras.tbl_ordencotizacompra where id_cotizaorden=_id_cotizaorden)then
+		if exists(select *from  ventas.tbl_direccion where id_persona=_id_proveedor and id_direccion=_id_dirproveedor)then
+			if exists(select *from planillas.tbl_persona where id_persona=_id_responsablecompra)then
+				UPDATE compras.tbl_ordencotizacompra
+				   SET 					
+					fecha_entrega=to_timestamp(_fecha_entrega,'YYYY-MM-DD HH24:MI:SS.MS'), 
+					serie=_serie, 
+					numero=_numero, 
+					id_tipoventa=_id_tipoventa, 
+					id_responsablecompra=_id_responsablecompra, 
+					id_solicitoordencompra=_id_solicitoordencompra, 
+					lugar_entrega=_lugar_entrega, 
+					id_comprobante=_id_comprobante, 
+					id_moneda=_id_moneda, 
+					id_tipocambio=_id_tipocambio, 
+					id_operacion=_id_operacion, 
+					id_dirproveedor=_id_dirproveedor, 
+					id_proveedor=_id_proveedor, 
+					id_direccionfactura=_id_direccionfactura, 
+					id_clientefactura=_id_clientefactura, 
+					imp_bruto=_imp_bruto, 
+					imp_dscto=_imp_dscto, 
+					valor_venta=_valor_venta, 
+					imp_persepcion=_imp_persepcion, 
+					imp_igv=_imp_igv, 
+					imp_total=_imp_total, 
+					id_igv=_id_igv, 
+					observaciones=_observaciones, 
+					id_estado=_id_estado, 
+					fec_actualiza=now(), 
+					id_usuarioactualiza=_id_usuario, 
+					id_sucursal=_id_sucursal,
+					tipo_cambio=_tipo_cambio,
+					total_dolares=_total_dolares
+				 WHERE id_cotizaorden=_id_cotizaorden returning array['0',id_cotizaorden::text] into res;
+				 
+			else
+				res:=array['503','Seleccione el responsable para realizar esta operación'];
+			end if;
+		else
+			res:=array['503','Seleccione el proveedor que sera dirigida la orden de compra'];
+		end if;
+	else
+		res:=array['503','Seleccione correctamente al momento de editar la orden de compra'];
+	end if;
+end if;
+return res;
+END;
+$BODY$;
+
+
+
 create or replace function planillas.fn_asistencia(f1 text,f2 text)
 returns table(
 	codigo text, 
@@ -198,6 +1568,87 @@ $BODY$;
 
 select *from common.v_ubigeo 
 select *from common.v_ubigeo
+select  *from almacen.tbl_producto
+
+select *from almacen.fn_list_products(1,'34')
+
+CREATE OR REPLACE FUNCTION almacen.fn_list_products(
+	op integer,
+	_id_producto varchar(30)
+)
+returns table(data json)
+as $$
+declare
+begin
+return query select row_to_json(t) as data
+from (
+  select  p.*,		             
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+      from (
+        
+       select 
+		  	fm.* 
+		 from almacen.tbl_familiamarca fm        
+       where fm.id_familia=p.id_familia and  fm.id_marca=p.id_marca        
+      ) d
+    ) as familia_marca,    
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+	  from (
+	   select 
+			f.* 
+		 from almacen.tbl_familia f        
+	   where f.id_familia=p.id_familia             
+	  ) d
+	) as familia,
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+	  from (
+
+	   select 
+			m.* 
+		 from almacen.tbl_marca m        
+	   where p.id_marca=m.id_marca      
+	  ) d
+	) as marca,
+	(
+	select array_to_json(array_agg(row_to_json(d)))
+	  from (
+	   select 
+			dp.* 
+		 from almacen.tbl_detproducto dp        
+	   where dp.id_producto=p.id_producto      
+	  ) d
+	) as detproducto,
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+	  from (
+
+	   select 
+			pre.* 
+		 from almacen.tbl_precio pre        
+	   where pre.id_producto=p.id_producto  
+	  ) d
+	) as precios,
+	(
+	 select array_to_json(array_agg(row_to_json(d)))
+	  from (
+
+	   select 
+			ex.* 
+		 from almacen.tbl_existencia ex        
+	   where ex.id_producto=p.id_producto  
+	  ) d
+	) as existencias
+  from almacen.tbl_producto p 
+	where  p.id_producto=_id_producto
+		 
+) t;
+end;$$
+language 'plpgsql';
+
+select  *from almacen.tbl_producto
 
 CREATE OR REPLACE FUNCTION planillas.fn_list_customers(
 	_filtro text)
@@ -272,6 +1723,8 @@ $BODY$;
 
 select *from planillas.v_persona
 
+select  *from ventas.add_address(1, 'JR. LIBERTAD S/N - ZARAGOZA', 1829, '83', '', 1, 255, 1) 
+
 CREATE OR REPLACE FUNCTION ventas.add_address(
     op integer,
     _direccion text,
@@ -288,13 +1741,7 @@ DECLARE
 	res text[];
 	correl bigint;
 BEGIN
-if op=1 then
-		select max(id_direccion) into correl from ventas.tbl_direccion;
-		if correl is null then
-			correl = 1;
-		else
-			correl = correl + 1;
-		end if;
+if not exists(select * from ventas.tbl_direccion where id_persona = _id_persona and id_direccion = _id_direccion) then		 
 		insert into ventas.tbl_direccion(
 			  id_direccion,
 			  direccion,
@@ -304,7 +1751,7 @@ if op=1 then
 			  id_estado,
 			  id_tipvivienda
 		)values(
-			  correl,
+			  _id_direccion,
 			  _direccion,
 			  _id_sector,
 			  _id_persona,
@@ -316,11 +1763,9 @@ if op=1 then
 		if not found then
 			return query  select  0 as statuscode, 'Inconsistencia inespera al momento de registar la dirección del cliente' as statusmessage;
 		end if;
-		 return query  select  1 as statuscode, 'Dirección actualizado' as statusmessage;
-end if;
-if op = 2 then
-	if exists(select * from ventas.tbl_direccion where id_persona = _id_persona and id_direccion = _id_direccion) then
-		update ventas.tbl_direccion set 
+		 return query  select  1 as statuscode, 'Dirección registrada' as statusmessage;
+ else
+	 	update ventas.tbl_direccion set 
 			  direccion = _direccion,
 			  id_sector = _id_sector,
 			  referencia = _referencia,
@@ -328,15 +1773,12 @@ if op = 2 then
 			  id_tipvivienda=_id_tipvivienda
 		  where id_persona = _id_persona and id_direccion = _id_direccion;
 		--  res:=array['0',_id_direccion::text, _id_persona];
-		  return query  select  1 as statuscode, 'Dirección actualizado' as statusmessage;
-	else		 
-		return query select  0 as statuscode,  'Verifique que los datos del cliente esten ingresado correctamente \n<<Direccion no Actualizada>>' as statusmessage;
-	end if;
+		  return query  select  1 as statuscode, 'Dirección actualizado' as statusmessage;	 
 end if;
 	
 END;$BODY$
-  LANGUAGE plpgsql VOLATILE
-  COST 100;
+  LANGUAGE plpgsql ;
+ 
 
 
 CREATE OR REPLACE FUNCTION planillas.add_customer(
@@ -381,16 +1823,7 @@ DECLARE
 	customerId text;
 BEGIN
 	IF OP=1 THEN
-		if not exists(select * from PLANILLAS.TBL_PERSONA where doc_persona = _doc_persona and cliente_proveedor = _cliente_proveedor) then
-			 
-				select  max(ID_PERSONA::numeric) into correl from PLANILLAS.TBL_PERSONA WHERE  ISNUMERIC(ID_PERSONA) and  length(ID_PERSONA)<=8 ;-- where cliente_proveedor=FALSE;
-				 
-				if correl is null then
-					_id_persona='1';
-				else
-					correl:=correl+1;
-					_id_persona:=correl::text;
-				end if;
+		if not exists(select * from PLANILLAS.TBL_PERSONA where trim(doc_persona) = trim(_doc_persona)) then			 		 				 
 				if ((_id_tipdocidentidad NOT IN(2,7) )and (length(_doc_persona)=8 ) ) then					 
 					return query 
 						select  0 as statuscode, 
@@ -404,7 +1837,7 @@ BEGIN
 						'0' as custumer_id;					
 				end if;
 				--select  *from planillas.tbl_tipdocidentidad
-			insert into PLANILLAS.TBL_PERSONA(
+				insert into PLANILLAS.TBL_PERSONA(
 				  id_persona ,
 				  id_estadocivil ,
 				  doc_persona ,
@@ -466,12 +1899,12 @@ BEGIN
 				  _facturar_a_clienteref,				 
 				  _gestiona_lineacredito
 				)returning TBL_PERSONA.id_persona into customerId;
-				if not found then
+				 
 				--res:=array['504','Inconsistencia inesperada al registrar el detalle de la cotizacion'];
 				return query 
 				    select  1 as statuscode, 
 					    'Cliente registrado' as statusmessage, 
-					    cast(orderId as text) as resourceid;
+					    cast(customerId as text) as resourceid;
 				IF NOT FOUND THEN
 					return query 
 						select  0 as statuscode, 
@@ -482,7 +1915,7 @@ BEGIN
 			if _cliente_proveedor=true then
 				return query 
 						select  0 as statuscode, 
-						'El Cliente con Documento de Identidad << ' || _doc_persona || ' >> ya esta registrado ..!! ' as statusmessage, 
+						'El Cliente con Documento de Identidad <<*** ' || _doc_persona || ' >> ya esta registrado ..!! ' as statusmessage, 
 						'0' as custumer_id;
 				 
 			else
@@ -509,35 +1942,35 @@ BEGIN
 						'Verifique la identificacion del cliente para el tipo RUC' as statusmessage, 
 						'0' as custumer_id;					
 				end if;
-			update PLANILLAS.TBL_PERSONA set 
-					  id_estadocivil =_id_estadocivil ,
-					  doc_persona = _doc_persona ,
-					  nombre_razon= _nombre_razon,
-					  razon_comercial = _razon_comercial,
-					  sexo = _sexo,
-					  email = _email,
-					  paginaweb = _paginaweb,
-					  fecha_nac = _fecha_nac::Date,
-					  tipo_persona = _tipo_persona,
-					  deuda_confidencial = _deuda_confidencial,
-					  no_apto_credito = _no_apto_credito,
-					  concientizado = _concientizado,
-					  copropietario = _copropietario,
-					  observaciones = _observaciones,
-					  id_estado = _id_estado,
-					  ID_VENDTITULAR=_ID_VENDTITULAR,
-					  ID_VENDSUPLENTE=_ID_VENDSUPLENTE,
-					  ID_COBRADOR=_ID_COBRADOR,
-					  IMP_MINIMOVENTA=_IMP_MINIMOVENTA,
-					  PERCEP_CLIENTE=_PERCEP_CLIENTE,
-					  AGENTE_PERCEPTOR=_AGENTE_PERCEPTOR,
-					  id_tipdocidentidad=_id_tipdocidentidad,
-					  PORCENT_PERCEPCION=_PORCENT_PERCEPCION,
-					  id_persona_ref=_id_persona_ref,
-					  id_direccion_ref=_id_direccion_ref ,
-					  facturar_a_clienteref =_facturar_a_clienteref ,
-					  cliente_proveedor=true,
-					  gestiona_lineacredito=_gestiona_lineacredito
+					update PLANILLAS.TBL_PERSONA set 
+						  id_estadocivil =_id_estadocivil ,
+						  doc_persona = _doc_persona ,
+						  nombre_razon= _nombre_razon,
+						  razon_comercial = _razon_comercial,
+						  sexo = _sexo,
+						  email = _email,
+						  paginaweb = _paginaweb,
+						  fecha_nac = _fecha_nac::Date,
+						  tipo_persona = _tipo_persona,
+						  deuda_confidencial = _deuda_confidencial,
+						  no_apto_credito = _no_apto_credito,
+						  concientizado = _concientizado,
+						  copropietario = _copropietario,
+						  observaciones = _observaciones,
+						  id_estado = _id_estado,
+						  ID_VENDTITULAR=_ID_VENDTITULAR,
+						  ID_VENDSUPLENTE=_ID_VENDSUPLENTE,
+						  ID_COBRADOR=_ID_COBRADOR,
+						  IMP_MINIMOVENTA=_IMP_MINIMOVENTA,
+						  PERCEP_CLIENTE=_PERCEP_CLIENTE,
+						  AGENTE_PERCEPTOR=_AGENTE_PERCEPTOR,
+						  id_tipdocidentidad=_id_tipdocidentidad,
+						  PORCENT_PERCEPCION=_PORCENT_PERCEPCION,
+						  id_persona_ref=_id_persona_ref,
+						  id_direccion_ref=_id_direccion_ref ,
+						  facturar_a_clienteref =_facturar_a_clienteref ,
+						  cliente_proveedor=true,
+						  gestiona_lineacredito=_gestiona_lineacredito
 					where id_persona=_id_persona;
 			return query 
 				    select  1 as statuscode, 
@@ -550,7 +1983,6 @@ BEGIN
 					    cast(_id_persona as text) as resourceid;
 		end if;
 	end if;
-	 
 END;$$
 language 'plpgsql';
 
@@ -1303,12 +2735,18 @@ return res;
 end;$$
 language 'plpgsql';
 
+
+
+
+
 CREATE OR REPLACE FUNCTION compras.fn_dscto_notacredito(
 	_id__compra bigint,
-	_id_sucursal integer
-)
-returns numeric(20,6) as $$
-
+	_id_sucursal integer)
+    RETURNS numeric
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
 declare
 	dat record;
 	imp_notacredito numeric(20,6);
@@ -1321,27 +2759,27 @@ begin
 	 SELECT sum(dc.imp_incluido) into imp_notacredito
 	   FROM compras.tbl_compra cp
 	     JOIN compras.tbl_detcompra dc ON cp.id__compra = dc.id__compra AND cp.id_sucursalcompra = dc.id_sucursalcompra
-	  WHERE cp.nota_credito = true AND cp.id__compra__ref=_id__compra and cp.id__sucursal__ref=_id_sucursal and
-		(cp.id_motivonotacredito = ANY (ARRAY['04'::bpchar, '05'::bpchar, '09'::bpchar]))
+	  WHERE cp.nota_credito = true AND cp.id__compra__ref=_id__compra and cp.id__sucursal__ref=_id_sucursal and 
+	  cp.id_estado=1 and dc.id_estado=1 and (cp.id_motivonotacredito = ANY (ARRAY['04'::bpchar, '05'::bpchar, '09'::bpchar]));
 	
-	;
+	RAISE NOTICE 'imp_notacredito is %', imp_notacredito;
 
-SELECT 
-	 
-	sum(x1.cantidad)  into cantidad_compras
-   FROM compras.tbl_detcompra dc
-   JOIN compras.tbl_compra cc ON cc.id__compra= dc.id__compra AND cc.id_sucursalcompra = dc.id_sucursalcompra
-   JOIN LATERAL almacen.fn_stock(dc.id_producto, dc.id_unidadventa, dc.id_almacen, dc.cantidad) x1(product_id, unit_id, val_unit, stock, cantidad) ON x1.product_id::text = dc.id_producto::text
-WHERE dc.imp_incluido > 0::numeric AND dc.id_estado = 1 and  cc.id__compra=_id__compra and cc.id_sucursalcompra=_id_sucursal
-  --GROUP BY cc.id__compra, cc.id_sucursalcompra,dc.id_producto,x1.unit_id
-;
+	SELECT sum(x1.cantidad)  into cantidad_compras
+	   FROM compras.tbl_detcompra dc
+	   JOIN compras.tbl_compra cc ON cc.id__compra= dc.id__compra AND cc.id_sucursalcompra = dc.id_sucursalcompra
+	   JOIN LATERAL almacen.fn_stock(dc.id_producto, dc.id_unidadventa, dc.id_almacen, dc.cantidad) x1(product_id, unit_id, val_unit, stock, cantidad) ON x1.product_id::text = dc.id_producto::text
+	WHERE dc.imp_incluido > 0::numeric AND dc.id_estado = 1 and cc.id_estado=1 and  cc.id__compra=_id__compra and cc.id_sucursalcompra=_id_sucursal
+	  --GROUP BY cc.id__compra, cc.id_sucursalcompra,dc.id_producto,x1.unit_id
+	;
 	if cantidad_compras>0 then
 		return  COALESCE(imp_notacredito,0)/COALESCE(cantidad_compras,0);
 	else
 		return 0.0000;
 	end if;
-end;$$
-language 'plpgsql';
+end;
+$BODY$;
+
+select  *from compras.fn_dscto_notacredito(1218,1);
 
 
 select  d.item,d.id_producto,producto,desc_unidad,cantidad,dp.val_unidad from compras.v_detcompras d
@@ -2053,6 +3491,28 @@ end;$BODY$
   COST 100;
 
 
+
+CREATE OR REPLACE FUNCTION almacen.corregir_codigo_producto()
+  RETURNS text AS
+$BODY$
+declare
+	dat record;
+	num bigint;
+begin
+  num:=1000;
+ for dat in select *from almacen.tbl_producto 
+	order by id_producto::integer asc loop
+	update almacen.tbl_producto set codigo= num::text
+	where id_producto=dat.id_producto ;
+	num:=num+1;
+	RAISE NOTICE 'num %', num;
+end loop;
+return '';
+end;$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
+
+select  *from almacen.corregir_codigo_producto();
 
 CREATE OR REPLACE FUNCTION ventas.ISP_NOTADEBITO(
     op integer,
@@ -3549,26 +5009,20 @@ While NroDia <= 364 loop
 
 
 
+
+select *from ventas.order_list(1,'01/01/2021','31/12/2021');
 CREATE OR REPLACE FUNCTION ventas.order_list(
-	_vendedor bigint
+	_vendedor bigint,
+	_f1 text,
+	_f2 text
 )
-returns table(
-	order_Id bigint,
-	branch_office_id integer,
-	order_date text,
-	serie_order char(4), 
-	number_order char(7),
-	customer_ducument varchar(12),
-	customer varchar(500),
-	sale_amount numeric(20,6),
-	tax_amount numeric(20,6),
-	total numeric(20,6),
-	customer_id varchar(15),
-	address_id bigint,
-	sale_type_id integer,	
-	gloss text,
-	sale_type varchar(20)
-) as $$
+    RETURNS TABLE(order_id bigint, branch_office_id integer, order_date text, serie_order character, number_order character, customer_ducument character varying, customer character varying, sale_amount numeric, tax_amount numeric, total numeric, customer_id character varying, address_id bigint, sale_type_id integer, gloss text, sale_type character varying) 
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+    ROWS 1000
+
+AS $BODY$
 declare
 begin
 return query select	
@@ -3590,10 +5044,11 @@ return query select
 from ventas.tbl_cotizacionpreventa o
 inner join planillas.tbl_persona p on p.id_persona=o.id_cliente
 inner join common.tbl_tipoventa tv on tv.id_tipoventa=o.id_tipoventa
+where o.fecha::date>=_f1::date and o.fecha::date<=_f2::date
 order by  o.fecha::date asc,serie,numero;
-limit 100;
-end;$$
-language 'plpgsql';
+--limit 100;
+end;
+$BODY$;
 
 select *from planillas.tbl_persona
 
@@ -3608,8 +5063,8 @@ declare
 	res text[];
 begin
 	 for dat in select generate_series(
-           (date '2020-01-01')::timestamp,
-           (date '2020-12-31')::timestamp,
+           (date '2021-01-01')::timestamp,
+           (date '2021-12-31')::timestamp,
            interval '1 day'
          ) as _fecha loop
          res:=(select planillas.isp_gestion_turno(1,1,1,dat._fecha::text,'1',1,'1','AUTOMATICO',false,false,1,0));
@@ -5088,6 +6543,76 @@ end;$BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;
 
+
+
+CREATE OR REPLACE FUNCTION almacen.spiu_sync_marca(
+    op integer,
+    codigo character,
+    _descripcion_larga character varying,
+    _descripcion_corta character varying,
+    _id_estado integer)
+  RETURNS table(statuscode integer,statusmessage text) AS
+$BODY$
+declare
+   cadena character varying;
+   item_id   VARCHAR;
+   id        INT8;
+   regs	     record;
+   res       TEXT[];
+begin
+if(not exists (select * from almacen.tbl_marca where id_marca = codigo)) then		 		
+	insert into almacen.tbl_marca (
+		id_marca,
+		descripcion_larga, 
+		descripcion_corta,
+		id_estado
+		)
+	values(
+		codigo, 
+		_descripcion_larga, 
+		_descripcion_corta,
+		_id_estado
+	) ;
+return query select 1 as statuscode,'Marca registrada' as statusmessage;
+else	 
+	update 
+		almacen.tbl_marca 
+	set 
+		descripcion_larga = _descripcion_larga , 
+		id_estado = _id_estado, 
+		descripcion_corta = _descripcion_corta 
+	where id_marca = codigo;
+	return query select 1 as statuscode,'Marca actualizada' as statusmessage;
+end if;
+ 
+end;$BODY$
+  LANGUAGE plpgsql VOLATILE
+
+
+create or replace function almacen.spiu_sync_familia_marca(
+	_id_familia char(5),
+	_id_marca char(4),
+	_id_estado integer
+)
+RETURNS table(statuscode integer,statusmessage text) AS $$
+declare
+begin
+if not exists(select  *from almacen.tbl_familiamarca where id_familia=_id_familia and id_marca=_id_marca) then
+	insert into almacen.tbl_familiamarca(id_familia,id_marca,id_estado)values(_id_familia,_id_marca,_id_estado);
+	return query select 1 as statuscode,'Familia marca registrada' as statusmessage;
+else
+	update 
+		almacen.tbl_familiamarca 
+	set 
+		id_estado=_id_estado
+	where id_familia=_id_familia and id_marca=_id_marca;
+	return query select 1 as statuscode,'Familia marca Actualizada' as statusmessage;
+end if;
+end;$$
+language 'plpgsql';
+  
+ select  *from almacen.tbl_familiamarca
+
 CREATE OR REPLACE FUNCTION ventas.isp_regla_descuento(
     op integer,
     _id_catalogo_dscto bigint,
@@ -5201,7 +6726,7 @@ end;$$
 language 'plpgsql';
 
 
-select *from  
+select *from  ventas.tbl_detfacturacion
 
 
 delete from almacen.tbl_kardex
@@ -8984,6 +10509,8 @@ select *from ventas.tbl_facturacion limit 10
 select *from common.tbl_comprobante order by 1
 select *from planillas.tbl_persona
 select *from common.tbl_sucursal
+select *from creditos.tbl_detpagocuota
+alter table creditos.tbl_detpagocuota add column imp_pago_cuota numeric(20,4) default 0;
 
 CREATE OR REPLACE FUNCTION caja.spi_detpagocuota(
     op integer,
@@ -8999,7 +10526,8 @@ CREATE OR REPLACE FUNCTION caja.spi_detpagocuota(
     _glosa text,
     _operaciones text,
     _imp_mora numeric(20,4),
-    _total_mora numeric(20,4)
+    _total_mora numeric(20,4),
+	_imp_pago_cuota numeric(20,4)
 )
   RETURNS text[] AS
 $BODY$
@@ -9024,7 +10552,8 @@ if op=1 then
 				  glosa,
 				  operaciones,
 				  imp_mora,
-				  total_mora
+				  total_mora,
+				  imp_pago_cuota
  
 			)values(
 				  _id_cuotas  ,
@@ -9039,7 +10568,8 @@ if op=1 then
 				  _glosa,
 				  _operaciones ,
 				  _imp_mora,
-				  _total_mora
+				  _total_mora,
+				  _imp_pago_cuota
 			)returning array['0','Proceso efectuado con exito'] into res;
 			if not found then
 				res:=array['504','Inconsitencia inesperada al registrar las cancelaciones de las cuotas'];
@@ -12316,6 +13846,59 @@ end;$BODY$
   COST 100;
 
 
+
+CREATE OR REPLACE FUNCTION almacen.spiu_add_familia(
+    op integer,
+    _codigo character,
+    _descripcion_larga character varying,
+    _id_grupo character,
+    _descripcion_corta character varying,
+    _id_estado integer
+)
+  RETURNS table(statuscode int,statusmessage text) AS $$
+declare
+   cadena character varying;
+   item_id   VARCHAR;
+   id        INT8;
+   regs	     record;
+   res       TEXT[];
+begin
+
+if(not exists (select * from almacen.tbl_familia where id_familia = _codigo)) then		 	
+		insert into almacen.tbl_familia (
+			id_familia,
+			descripcion_larga,
+			id_grupo,
+			descripcion_corta,
+			id_estado
+			)
+		values(
+			item_id, 
+			_descripcion_larga,
+			_id_grupo,
+			_descripcion_corta,
+			_id_estado
+		);  
+	return query select 1 as statuscode,'Familia registrada' as statusmessage;
+else
+	update 
+		almacen.tbl_familia 
+	set 
+		descripcion_larga = _descripcion_larga , 
+		id_estado = _id_estado, 
+		descripcion_corta = _descripcion_corta, 
+		id_grupo = _id_grupo 
+	where id_familia = _codigo;	
+	return query select 1 as statuscode,'Familia actualizada' as statusmessage;	 
+end if;
+ 
+end;$$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
+
+
+
+
 CREATE OR REPLACE FUNCTION contabilidad.list__libromayor(
     IN __nivel integer,
     IN __id__empresa integer,
@@ -13512,7 +15095,9 @@ CREATE OR REPLACE FUNCTION ventas.spi_detfacturacion(
     _tg boolean,
     _icbper boolean,
     _imp_icbper numeric(20,4),--,
-    _anticipo boolean
+    _anticipo boolean,
+    _costo numeric(20,4),
+    _val_unidad numeric(20,4)
     --_afectacionigv_id integer
 )
   RETURNS text[] AS
@@ -13578,7 +15163,10 @@ if op=1 then
 				tg,
 				icbper,
 				imp_icbper,
-				anticipo
+				anticipo,
+				costo/*,
+				val_unimedventa,
+				num_unidades*/
 				--afectacionigv_id
 			)values(
 				id_detfact,
@@ -13606,7 +15194,10 @@ if op=1 then
 				_tg,
 				_icbper,
 				_imp_icbper,
-				_anticipo
+				_anticipo,
+				_costo/*,
+				_val_unidad,
+				(_val_unidad*_cantidad)*/
 				--_afectacionigv_id
 			)returning array['0',
 					TBL_DETFACTURACION.item::text,
@@ -13657,7 +15248,9 @@ if op=2 then
 			tg=_tg,
 			icbper=_icbper,
 			imp_icbper=_imp_icbper,
-			anticipo=_anticipo
+			anticipo=_anticipo/*,
+			val_unimedventa=_val_unidad,
+			num_unidades=(_val_unidad*_cantidad)*/
 			--afectacionigv_id=_afectacionigv_id
 			where item=_item and id_producto=_id_producto and 
 			id_unidadventa=_id_unidadventa and 
@@ -13672,6 +15265,7 @@ END;$BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;
 
+select * from almacen.fn_get_stock_mobil(332,2)
 
 substring()
 
@@ -19690,7 +21284,149 @@ END;$BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;
 
-INTERPAS PERU
+
+
+
+
+CREATE OR REPLACE FUNCTION caja.spi_result_movcajacuota(
+    op integer,
+    _id_movimcaja integer,
+    _id_caja_origen integer,
+    _id_caja_destino integer,
+    _id_persona character varying,
+    _id_sucursal_fac integer,
+    _id_facturacion integer,
+    _serie character,
+    _numero character,
+    _fecha_mov text,
+    _descargo boolean,
+    _imp_mora numeric,
+    _imp_movimiento numeric,
+    _imp_recibido numeric,
+    _imp_vuelto numeric,
+    _glosa text,
+    _id_comprobante integer,
+    _id_moneda integer,
+    _id_tipocambio integer,
+    _id_sucursal integer,
+    _id_usuario character,
+    _doc_referencia text,
+    _id_estado integer,
+    _id_tranzaccion character,
+    _id_turno integer,
+    _puntos numeric,
+    _id_cuenta integer,
+    _id_concepto character varying,
+    _id_centrocostos integer,
+    _dni_cliente character,
+    _nomape_cliente text,
+    _id_personaingdiv character varying,
+    _pronto_pago boolean,
+    _liquidacion_id bigint,
+    _fecha_liquidacion text,
+    _id_usuario_autoriza varchar(5)
+    )
+  RETURNS table(Code text,message text, id bigint,sucursal_id integer) AS
+$BODY$
+DECLARE
+	correl integer;
+	movimientoId integer;
+	sucursalId integer;
+	res text[];
+BEGIN
+if op=1 then
+	if  exists(select *from caja.tbl_cajabanco where id_cajabanco=_id_caja_destino) then
+		select max(id_movimcaja) into correl from  CAJA.TBL_MOVCAJA where  id_sucursal=_id_sucursal;
+		if correl is  null then
+			correl:=1;
+		else
+			correl:=correl+1;
+		end if;
+		insert into CAJA.TBL_MOVCAJA(
+			id_movimcaja,
+			id_facturacion,
+			id_caja_destino,
+			id_persona,
+			id_sucursal_fac,
+			serie,
+			numero,
+			fecha_mov,
+			descargo ,
+			imp_mora ,
+			imp_movimiento,
+			imp_recibido  ,
+			imp_vuelto    ,
+			glosa         ,
+			id_comprobante,
+			id_moneda     ,
+			id_tipocambio ,
+			id_sucursal   ,
+			id_usuario    ,
+			doc_referencia,
+			id_estado,
+			id_tranzaccion,
+			id_turno,
+			id_cuenta,
+			id_concepto,
+			id_centrocostos,
+			dni_cliente ,
+			nomape_cliente  ,
+			id_personaingdiv ,
+			pronto_pago,
+			liquidacion_id,
+			fecha_liquidacion,
+			id_usuario_autoriza
+		)values(
+			correl,
+			case when _id_facturacion =0 then null else _id_facturacion end ,
+			_id_caja_destino,
+			_id_persona,
+			case when _id_sucursal_fac=0 then null else _id_sucursal_fac end,
+			_serie,
+			_numero,
+			to_timestamp(_fecha_mov,'YYYY-MM-DD HH24:MI:SS.MS') ,
+			_descargo ,
+			_imp_mora ,
+			_imp_movimiento,
+			_imp_recibido  ,
+			_imp_vuelto    ,
+			_glosa         ,
+			_id_comprobante,
+			_id_moneda     ,
+			_id_tipocambio ,
+			_id_sucursal   ,
+			_id_usuario    ,
+			_doc_referencia,
+			_id_estado,
+			_id_tranzaccion,
+			_id_turno,
+			_id_cuenta,
+			_id_concepto,
+			_id_centrocostos,
+			_dni_cliente ,
+			_nomape_cliente  ,
+			_id_personaingdiv ,
+			_pronto_pago,
+			_liquidacion_id,
+			_fecha_liquidacion::date,
+			_id_usuario_autoriza
+		) returning TBL_MOVCAJA.id_movimcaja::text,TBL_MOVCAJA.id_sucursal into movimientoId,sucursalId;
+			return query select '504' as Code,'Inconsistencia inesperada al registrar el movimiento de caja' as message,0 as movimientoId,0 as sucursalId;
+		if not found then
+		return query select '504' as Code,'Inconsistencia inesperada al registrar el movimiento de caja' as message,0 as movimientoId,0 as sucursalId;
+			--res:=array['504','Inconsistencia inesperada al registrar el movimiento de caja'];
+		end if;
+		
+	else
+		return query select '504' as Code,'Verefique que la caja este ingresado correctamente' as message,0 as movimientoId,0 as sucursalId;
+		--res:=array['504','Verefique que la caja este ingresado correctamente'];
+	end if;
+end if;	
+END;$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
+
+ 
 
 
 CREATE OR REPLACE FUNCTION almacen.fn_elminar_serie_producto(_idserie bigint)
@@ -20840,6 +22576,7 @@ END IF;*/
 RETURN RES;
 END;$BODY$
   LANGUAGE plpgsql VOLATILE
+
  
 
 
@@ -23006,6 +24743,8 @@ select *from almacen.tbl_detproducto
 
 select * from ventas.fn_rentabilidad_x_producto(1,1,'29/05/2017','29/05/2020','172  ')
 
+
+
 CREATE OR REPLACE FUNCTION VENTAS.fn_rentabilidad_x_producto(
 	 op integer,
 	 _id_empresa integer,
@@ -23039,21 +24778,25 @@ returns table(
 		M.DESCRIPCION_LARGA AS MARCA,
 		U.DESC_LARGA AS UNIDAD,
 		DP.VAL_UNIDAD AS VALOR,
-		SUM(DF.CANTIDAD)-COALESCE(Z.CANTIDAD,0) AS CANTIDAD,
-		sum(DF.importe)/sum(df.cantidad) AS PRECIO,
+		SUM(x.cantidad)-COALESCE(Z.CANTIDAD,0) AS CANTIDAD,
+		sum(df.importe)/sum((CASE
+                                    WHEN (x.cantidad > (0)::numeric) THEN x.cantidad
+                                    ELSE (1)::numeric
+                                END)) AS PRECIO,
 		SUM(DF.importe)-COALESCE(Z.IMPORTE,0) AS TOTAL_VENTA,
 		dp.coste AS precio_compra,
-		dp.coste*SUM(DF.CANTIDAD) as total_compra,
+		dp.coste*SUM(x.cantidad) as total_compra,
 		p.codigo::text as codigo,
 		DDP.codigo_barra::text as codigo_barra
 		FROM VENTAS.TBL_FACTURACION F
 		INNER JOIN VENTAS.TBL_DETFACTURACION DF ON (F.ID_FACTURACION=DF.ID_FACTURACION and f.id_sucursal=df.id_sucursal)
-		INNER JOIN ALMACEN.TBL_PRECIO DP ON(DP.ID_PRODUCTO=DF.ID_PRODUCTO AND DP.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)
-		INNER JOIN ALMACEN.TBL_DETPRODUCTO DDP ON(DDP.ID_PRODUCTO=DF.ID_PRODUCTO AND DDP.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)
+		INNER JOIN ALMACEN.TBL_DETPRODUCTO DDP ON(DDP.ID_PRODUCTO=DF.ID_PRODUCTO and ddp.unidad_inventario=true)
+		JOIN LATERAL almacen.fn_stock(df.id_producto, df.id_unidadventa, df.id_almacen, df.cantidad) x(product_id, unit_id, val_unit, stock, cantidad) ON (((x.product_id)::text = (ddp.id_producto)::text))
+		inner join ALMACEN.TBL_PRECIO DP ON DP.ID_PRODUCTO=DF.ID_PRODUCTO AND DP.ID_UNIDADVENTA=X.UNIT_ID
 		INNER JOIN ALMACEN.TBL_PRODUCTO P ON(P.ID_PRODUCTO=DP.ID_PRODUCTO)
 		INNER JOIN ALMACEN.TBL_FAMILIA FA ON (FA.ID_FAMILIA=P.ID_FAMILIA)
 		INNER JOIN ALMACEN.TBL_MARCA M ON (M.ID_MARCA=P.ID_MARCA)
-		INNER JOIN ALMACEN.TBL_UNIDAD U ON (U.ID_UNIDADVENTA=DF.ID_UNIDADVENTA)  
+		JOIN almacen.tbl_unidad u ON ((u.id_unidadventa = x.unit_id))
 		INNER JOIN COMMON.TBL_SUCURSAL SUC ON SUC.ID_SUCURSAL=F.ID_SUCURSAL
 		LEFT JOIN (SELECT 
 				FF.ID_FACTURACIONREF AS ID_FACTURACION,
@@ -25635,8 +27378,8 @@ if not exists(select 1 from ALMACEN.TBL_PRECIO where id_producto=_id_producto an
 			_val_minimo_venta,
 			_ID_TIPOVENTA,
 			_UNDPRED_COMPRA,
-			_precio2  ,
-			_precio3 ,
+			_precio4  ,
+			_precio5 ,
 			_peso,
 			_porcent1,
 			_porcent2,
@@ -25688,6 +27431,10 @@ return res;
 END;$BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;
+
+ select  *from ventas.tbl_facturacion where date_part('year',fecha_venta)=fecha_reg and date_part('month',fecha_venta)=3 and id_comprobante=3
+
+update ventas.tbl_facturacion set fecha_venta='31/03/2021' where date_part('year',fecha_venta)=2020 and date_part('month',fecha_venta)=3 and id_comprobante=3
  
 
 select * from almacen.list_kardex_batch('14/11/2017','14/11/2019',1,1)
@@ -25729,7 +27476,8 @@ CREATE OR REPLACE FUNCTION almacen.spi_producto(
     _garantia_meses integer ,
     _frecuencia_reviciones integer,
     _cantidad_fraccionada boolean,
-    _afecto_icbper boolean
+    _afecto_icbper boolean,
+    _solicitadatosadicionales boolean
 )
   RETURNS text[] AS
 $BODY$
@@ -25785,7 +27533,8 @@ IF OP=1 THEN
 				garantia_meses,
 				frecuencia_reviciones,
 				cantidad_fraccionada,
-				afecto_icbper
+				afecto_icbper,
+				solicitadatosadicionales
 			)VALUES(
 				_id_producto,
 				_id_familia,
@@ -25819,7 +27568,8 @@ IF OP=1 THEN
 				_garantia_meses,
 				_frecuencia_reviciones,
 				_cantidad_fraccionada,
-				_afecto_icbper
+				_afecto_icbper,
+				_solicitadatosadicionales
 			)returning array['0',tbl_producto.id_producto::text]into res;
 			if not found then
 				res:=array['504','Inconsistencia inesperada al registar el producto'];
@@ -25866,7 +27616,8 @@ IF OP=2 THEN
 			garantia_meses=_garantia_meses,
 			frecuencia_reviciones=_frecuencia_reviciones,
 			cantidad_fraccionada=_cantidad_fraccionada,
-			afecto_icbper=_afecto_icbper
+			afecto_icbper=_afecto_icbper,
+			solicitadatosadicionales=_solicitadatosadicionales
 			WHERE ID_PRODUCTO=_ID_PRODUCTO;
 			update almacen.TBL_SALDOSEXISTENCIA set id_estado=_id_estado where id_producto=_id_producto and id_sucursal=_id_sucursal;
 			RES:=ARRAY['0',cast(_ID_PRODUCTO as varchar(20))];
@@ -25880,8 +27631,171 @@ END;$BODY$
   LANGUAGE plpgsql VOLATILE
   COST 100;
 
-ALTER FUNCTION almacen.spi_producto(integer, character varying, character, character, character varying, character varying, character varying, boolean, integer, double precision, boolean, character varying, boolean, boolean, boolean, boolean, text, text, text, boolean, boolean, character, bytea, integer, integer, boolean, integer, boolean, boolean, boolean, bigint, boolean)
-  OWNER TO postgres;
+
+
+
+
+CREATE OR REPLACE FUNCTION almacen.spi_sync_producto(
+    op integer,
+    _id_producto character varying,
+    _id_familia character,
+    _id_marca character,
+    _descripcion_larga character varying,
+    _descripcion_corta character varying,
+    _cod_barra character varying,
+    _servicio boolean,
+    _id_estado integer,
+    _impuesto double precision,
+    _reintegro_tributario boolean,
+    _partida_arancelaria character varying,
+    _dev_envases boolean,
+    _perecible boolean,
+    _sujet_percepcion boolean,
+    _vende_pack boolean,
+    _obs_compra text,
+    _obs_venta text,
+    _caracteristicas text,
+    _favorito boolean,
+    _gen_correl boolean,
+    _codigo character,
+    _image bytea,
+    _id_color integer,
+    _id_impuesto integer,
+    _inventariado boolean,
+    _id_sucursal integer,
+    _activo_fijo boolean,
+    _gestiona_lotes boolean,
+    _gestiona_series boolean,
+    _id_modelo bigint,
+    _venta_retaceo boolean,
+    _garantia_meses integer ,
+    _frecuencia_reviciones integer,
+    _cantidad_fraccionada boolean,
+    _afecto_icbper boolean
+)
+  RETURNS table(statuscode integer,statusmessage text) AS
+$BODY$
+DECLARE
+	RES TEXT[];
+	correl integer;
+BEGIN
+IF NOT EXISTS(SELECT *FROM ALMACEN.TBL_PRODUCTO WHERE id_producto=_id_producto) THEN
+	INSERT INTO ALMACEN.TBL_PRODUCTO(
+		id_producto,
+		id_familia,
+		id_marca,
+		descripcion_larga,
+		descripcion_corta,
+		cod_barra ,
+		servicio  ,
+		id_estado ,
+		impuesto  ,
+		reintegro_tributario,
+		partida_arancelaria,
+		dev_envases        ,
+		perecible          ,
+		sujet_percepcion   ,
+		vende_pack         ,
+		obs_compra         ,
+		obs_venta          ,
+		caracteristicas     ,
+		favorito ,
+		codigo,
+		image,
+		id_color,
+		id_impuesto,
+		INVENTARIADO,
+		activo_fijo,
+		GESTIONA_LOTES,
+		gestiona_series,
+		id_modelo,
+		venta_retaceo,
+		garantia_meses,
+		frecuencia_reviciones,
+		cantidad_fraccionada,
+		afecto_icbper
+	)VALUES(
+		_id_producto,
+		_id_familia,
+		_id_marca,
+		_descripcion_larga,
+		_descripcion_corta,
+		_cod_barra ,
+		_servicio  ,
+		_id_estado ,
+		_impuesto  ,
+		_reintegro_tributario,
+		_partida_arancelaria,
+		_dev_envases        ,
+		_perecible          ,
+		_sujet_percepcion   ,
+		_vende_pack         ,
+		_obs_compra         ,
+		_obs_venta          ,
+		_caracteristicas     ,
+		_favorito ,
+		_codigo,
+		_image,
+		_id_color,
+		_id_impuesto,
+		_INVENTARIADO,
+		_activo_fijo,
+		_GESTIONA_LOTES,
+		_gestiona_series,
+		_id_modelo,
+		_venta_retaceo,
+		_garantia_meses,
+		_frecuencia_reviciones,
+		_cantidad_fraccionada,
+		_afecto_icbper
+	) ;
+	return query select  1 as statuscode,'Producto Registrado' as statusmessage ;
+ELSE
+		UPDATE ALMACEN.TBL_PRODUCTO SET 
+			id_familia=_id_familia,
+			id_marca=_id_marca,
+			descripcion_larga=_descripcion_larga,
+			descripcion_corta=_descripcion_corta,
+			cod_barra=_cod_barra ,
+			servicio=_servicio  ,
+			--id_estado =_id_estado,
+			impuesto=_impuesto  ,
+			reintegro_tributario=_reintegro_tributario,
+			partida_arancelaria=_partida_arancelaria,
+			dev_envases=_dev_envases,
+			perecible=_perecible,
+			sujet_percepcion=_sujet_percepcion,
+			vende_pack=_vende_pack,
+			obs_compra=_obs_compra,
+			obs_venta=_obs_venta,
+			caraCteristicas=_caracteristicas,
+			favorito =_favorito  ,
+			codigo=_codigo,
+			image=_image,
+			id_color=_id_color,
+			id_impuesto=_id_impuesto,
+			INVENTARIADO=_INVENTARIADO,
+			activo_fijo=_activo_fijo,
+			GESTIONA_LOTES=_GESTIONA_LOTES,
+			gestiona_series=_gestiona_series,
+			id_modelo=_id_modelo,
+			id_estado=_id_estado,
+			venta_retaceo=_venta_retaceo,
+			garantia_meses=_garantia_meses,
+			frecuencia_reviciones=_frecuencia_reviciones,
+			cantidad_fraccionada=_cantidad_fraccionada,
+			afecto_icbper=_afecto_icbper
+		WHERE ID_PRODUCTO=_ID_PRODUCTO;
+		return query select  1 as statuscode,'Producto actualizada' as statusmessage ;
+		  
+END IF;
+RETURN RES;
+END;$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
+
+
+ 
 
 select * from GRIFO.ISP_GRABARLECCONTOMETRO(2,1,2,1,'2017-05-30 18:41:46.45','0.00','0.00','0.00','0.00','10.9000','11.207','122.1563',1,'1',1,'1',2,1,'0','8951.5350','8962.7420')
 
@@ -31349,107 +33263,112 @@ DECLARE
 	res text[];
 	correl integer;
 BEGIN
+_TIPDOCUMENTO:='TCK';
 IF OP=1 THEN
 	IF EXISTS(SELECT 1 FROM VENTAS.TBL_DIRECCION WHERE id_direccion=_id_direccion AND id_persona=_id_cliente) THEN
-		SELECT MAX(id_cotizapreventa) INTO CORREL FROM VENTAS.TBL_COTIZACIONPREVENTA ;--WHERE ID_SUCURSAL=_ID_SUCURSAL;
-		IF CORREL IS NULL THEN
-			CORREL:=1;
+		IF NOT EXISTS(SELECT  1 FROM ventas.tbl_cotizacionpreventa WHERE SERIE=_serie AND NUMERO=_NUMERO) THEN 
+			SELECT MAX(id_cotizapreventa) INTO CORREL FROM VENTAS.TBL_COTIZACIONPREVENTA ;--WHERE ID_SUCURSAL=_ID_SUCURSAL;
+			IF CORREL IS NULL THEN
+				CORREL:=1;
+			ELSE
+				CORREL:=CORREL+1;
+			END IF;
+			if (_id_cliente='000'  and _imp_total>750 )  then
+				res:=array['506','Es obligatorio ingresar datos completos del cliente(DNI,Nombres y apellidos,direccion) a partir de 750.00  soles'];
+				return res;
+			end if;
+			INSERT INTO ventas.tbl_cotizacionpreventa(
+				    id_cotizapreventa, 
+				    id_cotizacion, 
+				    id_sucursalcotizacion, 
+				    id_sucursal, 
+				    serie, 
+				    numero, 
+				    id_comprobante, 
+				    fecha, 
+				    id_tranzaccion, 
+				    imp_bruto, 
+				    imp_dscto, 
+				    valor_venta, 
+				    imp_igv, 
+				    imp_total, 
+				    id_estado, 
+				    id_direccion, 
+				    id_cliente, 
+				    cotizacion, 
+				    preventa, 
+				    id_usuarior, 
+				    id_tipoventa, 
+				    glosa, 
+				    id_igv, 
+				    id_tipocambio, 
+				    id_moneda, 
+				    redondeo, 
+				    id_usuarioa, 
+				    date_act, 
+				    id_operacion, 
+				    valido_hasta,
+				    ID_VENDEDOR,
+				    DNI_CLIENTE,
+				    NOMAPE_CLIENTE,
+				    DIRECCION_CLIENTE,
+				    TIPDOCUMENTO,
+				    BLOQUEAR_ENCAJA,
+				    IMP_PERCEPCION,
+				    IMP_NETO,
+				    TELEFONO_CLI,
+				    orden_compra
+				)
+			    VALUES (
+				    CORREL,-- id_cotizapreventa, 
+				    case when _id_cotizacion=0 then null else _id_cotizacion end, 
+				   case when _id_sucursalcotizacion=0 then null else _id_sucursalcotizacion end, 
+				    _id_sucursal, 
+				    _serie, 
+				    _numero, 
+				    _id_comprobante, 
+				    now(),--to_timestamp(_fecha,'YYYY-MM-DD HH24:MI:SS.MS'), 
+				    _id_tranzaccion, 
+				    _imp_bruto, 
+				    _imp_dscto, 
+				    _valor_venta, 
+				    _imp_igv, 
+				    _imp_total, 
+				    _id_estado, 
+				    _id_direccion, 
+				    _id_cliente, 
+				    _cotizacion, 
+				    _preventa, 
+				    _id_usuario, 
+				    _id_tipoventa, 
+				    _glosa, 
+				    _id_igv, 
+				    _id_tipocambio, 
+				    _id_moneda, 
+				    _redondeo, 
+				    _id_usuario, 
+				    now(), 
+				    _id_operacion, 
+				    now(),--to_timestamp(_valido_hasta,'YYYY-MM-DD HH24:MI:SS.MS'),
+				    _ID_VENDEDOR,
+				    _DNI_CLIENTE,
+				    _NOMAPE_CLIENTE,
+				    _DIRECCION_CLIENTE,
+				    _TIPDOCUMENTO,
+				    _BLOQUEAR_ENCAJA,
+				    _IMP_PERCEPCION,
+				    _IMP_NETO,
+				    _telefono,
+				    _orden_compra
+							    
+			) RETURNING ARRAY['0',id_cotizapreventa::TEXT,id_sucursal::TEXT] INTO RES;
+			IF NOT FOUND THEN
+				RES:=ARRAY['504','Inconsistencia inesperada verfique que los datos esten ingresados correctamente'];
+			END IF;
 		ELSE
-			CORREL:=CORREL+1;
+			RES:=ARRAY['502','ORDEN DE VENTA YA GENERADA','0'];
+	--ROLLBACK
 		END IF;
-		if (_id_cliente='000'  and _imp_total>750 )  then
-			res:=array['506','Es obligatorio ingresar datos completos del cliente(DNI,Nombres y apellidos,direccion) a partir de 750.00  soles'];
-			return res;
-		end if;
-		INSERT INTO ventas.tbl_cotizacionpreventa(
-			    id_cotizapreventa, 
-			    id_cotizacion, 
-			    id_sucursalcotizacion, 
-			    id_sucursal, 
-			    serie, 
-			    numero, 
-			    id_comprobante, 
-			    fecha, 
-			    id_tranzaccion, 
-			    imp_bruto, 
-			    imp_dscto, 
-			    valor_venta, 
-			    imp_igv, 
-			    imp_total, 
-			    id_estado, 
-			    id_direccion, 
-			    id_cliente, 
-			    cotizacion, 
-			    preventa, 
-			    id_usuarior, 
-			    id_tipoventa, 
-			    glosa, 
-			    id_igv, 
-			    id_tipocambio, 
-			    id_moneda, 
-			    redondeo, 
-			    id_usuarioa, 
-			    date_act, 
-			    id_operacion, 
-			    valido_hasta,
-			    ID_VENDEDOR,
-			    DNI_CLIENTE,
-			    NOMAPE_CLIENTE,
-			    DIRECCION_CLIENTE,
-			    TIPDOCUMENTO,
-			    BLOQUEAR_ENCAJA,
-			    IMP_PERCEPCION,
-			    IMP_NETO,
-			    TELEFONO_CLI,
-			    orden_compra
-			)
-		    VALUES (
-			    CORREL,-- id_cotizapreventa, 
-			    case when _id_cotizacion=0 then null else _id_cotizacion end, 
-			   case when _id_sucursalcotizacion=0 then null else _id_sucursalcotizacion end, 
-			    _id_sucursal, 
-			    _serie, 
-			    _numero, 
-			    _id_comprobante, 
-			    now(),--to_timestamp(_fecha,'YYYY-MM-DD HH24:MI:SS.MS'), 
-			    _id_tranzaccion, 
-			    _imp_bruto, 
-			    _imp_dscto, 
-			    _valor_venta, 
-			    _imp_igv, 
-			    _imp_total, 
-			    _id_estado, 
-			    _id_direccion, 
-			    _id_cliente, 
-			    _cotizacion, 
-			    _preventa, 
-			    _id_usuario, 
-			    _id_tipoventa, 
-			    _glosa, 
-			    _id_igv, 
-			    _id_tipocambio, 
-			    _id_moneda, 
-			    _redondeo, 
-			    _id_usuario, 
-			    now(), 
-			    _id_operacion, 
-			    now(),--to_timestamp(_valido_hasta,'YYYY-MM-DD HH24:MI:SS.MS'),
-			    _ID_VENDEDOR,
-			    _DNI_CLIENTE,
-			    _NOMAPE_CLIENTE,
-			    _DIRECCION_CLIENTE,
-			    _TIPDOCUMENTO,
-			    _BLOQUEAR_ENCAJA,
-			    _IMP_PERCEPCION,
-			    _IMP_NETO,
-			    _telefono,
-			    _orden_compra
-			    			    
-		) RETURNING ARRAY['0',id_cotizapreventa::TEXT,id_sucursal::TEXT] INTO RES;
-		IF NOT FOUND THEN
-			RES:=ARRAY['504','Inconsistencia inesperada verfique que los datos esten ingresados correctamente'];
-		END IF;
-	--ROLLBACK;
 	else
 		RES:=ARRAY['503','Seleccione un cliente para realizar este proceso'];
 		--ROLLBACK;
@@ -34025,7 +35944,8 @@ CREATE OR REPLACE FUNCTION common.spiu_empresa(
 	_smtp_facturacion varchar(200) ,
 	_port_facturacion varchar(200) ,
 	_endpoint_mobil text,
-	_genera_mobil boolean
+	_genera_mobil boolean,
+	_correo_ssl boolean
     )
   RETURNS text[] AS
 $BODY$
@@ -34063,7 +35983,8 @@ if($1=1) then
 			smtp_facturacion ,
 			port_facturacion  ,
 			endpoint_mobil,
-			genera_mobil
+			genera_mobil,
+			correo_ssl
 			)
 		values(
 			correl, 
@@ -34086,7 +36007,8 @@ if($1=1) then
 			_smtp_facturacion ,
 			_port_facturacion,
 			_endpoint_mobil,
-			_genera_mobil
+			_genera_mobil,
+			_correo_ssl
 		) RETURNING array['0', tbl_empresa.id_empresa::text] INTO res;
 		if not found then
 			res:=array['504','Inconsistencia inesperada al registrar'];
@@ -34118,7 +36040,8 @@ if op=2 then
 			smtp_facturacion=_smtp_facturacion ,
 			port_facturacion=_port_facturacion ,
 			endpoint_mobil=_endpoint_mobil,
-			genera_mobil=_genera_mobil 
+			genera_mobil=_genera_mobil ,
+			correo_ssl=_correo_ssl
 		where id_empresa = codigo::integer;
 		res:=array['0',codigo::text];
 	else
